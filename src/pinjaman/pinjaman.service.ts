@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { JenisPendapatan, JenisSimpanan, StatusPinjaman } from '@prisma/client';
+import { JenisPendapatan, JenisSimpanan, KategoriPangkat, Role, StatusPinjaman } from '@prisma/client';
 import { JwtUser } from '../common/interfaces/jwt-user.interface';
 import {
   hitungJadwalAngsuran,
@@ -39,14 +39,24 @@ const ALLOWED_TRANSITIONS: Partial<Record<StatusPinjaman, StatusPinjaman[]>> = {
     StatusPinjaman.DITOLAK,
   ],
   [StatusPinjaman.REKOMENDASI_PIMPINAN]: [
-    StatusPinjaman.SETUJU_KAPRIM,
+    StatusPinjaman.SETUJU_KEPRIM,
     StatusPinjaman.DITOLAK,
   ],
-  [StatusPinjaman.SETUJU_KAPRIM]: [
+  [StatusPinjaman.SETUJU_KEPRIM]: [
     StatusPinjaman.MENUNGGU_DOKUMEN,
     StatusPinjaman.DITOLAK,
   ],
   [StatusPinjaman.MENUNGGU_DOKUMEN]: [StatusPinjaman.DICAIRKAN],
+};
+
+// Plafond maksimal pinjaman berdasarkan kategori pangkat
+const PLAFOND_MAKS: Record<KategoriPangkat, number> = {
+  [KategoriPangkat.BINTARA]: 50_000_000,
+  [KategoriPangkat.BATA_ASN]: 50_000_000,
+  [KategoriPangkat.PNS]: 50_000_000,
+  [KategoriPangkat.PAMA]: 100_000_000,
+  [KategoriPangkat.PAMEN]: 100_000_000,
+  [KategoriPangkat.PATI]: 100_000_000,
 };
 
 @Injectable()
@@ -54,14 +64,97 @@ export class PinjamanService {
   constructor(private readonly prisma: PrismaService) {}
 
   findAll(user: JwtUser, status?: StatusPinjaman) {
+    const isAnggota = user.role === Role.ANGGOTA;
     return this.prisma.pinjaman.findMany({
       where: {
-        anggota: { satminkalId: user.satminkalId },
+        anggota: {
+          satminkalId: user.satminkalId,
+          ...(isAnggota ? { nrpNip: user.username } : {}),
+        },
         ...(status ? { status } : {}),
       },
       include: pinjamanInclude,
       orderBy: { tanggalAjuan: 'desc' },
     });
+  }
+
+  // Hitung sisa kuota plafond pinjaman anggota berdasarkan kategori pangkat
+  async getPlafondInfo(user: JwtUser, anggotaId: string) {
+    const anggota = await this.prisma.anggota.findFirst({
+      where: { id: anggotaId, satminkalId: user.satminkalId },
+      include: { pangkat: true },
+    });
+    if (!anggota) {
+      throw new NotFoundException('Anggota tidak ditemukan');
+    }
+
+    const kategori = anggota.pangkat.kategori;
+    const maksPlafond = PLAFOND_MAKS[kategori] ?? 50_000_000;
+
+    // Total pinjaman aktif (belum lunas & belum ditolak)
+    const activeLoans = await this.prisma.pinjaman.findMany({
+      where: {
+        anggotaId,
+        status: { notIn: [StatusPinjaman.LUNAS, StatusPinjaman.DITOLAK] },
+      },
+      select: { nominal: true, sisaPokok: true },
+    });
+
+    const totalPinjamanAktif = activeLoans.reduce((acc, loan) => {
+      return acc + toNumber(loan.sisaPokok ?? loan.nominal);
+    }, 0);
+
+    const sisaKuota = Math.max(0, maksPlafond - totalPinjamanAktif);
+
+    return {
+      anggotaId,
+      kategoriPangkat: kategori,
+      maksPlafond,
+      totalPinjamanAktif,
+      sisaKuota,
+      label: kategori === KategoriPangkat.BINTARA || kategori === KategoriPangkat.BATA_ASN || kategori === KategoriPangkat.PNS
+        ? 'Bintara / PNS / ASN (Maks. Rp 50.000.000)'
+        : 'Perwira (Maks. Rp 100.000.000)',
+    };
+  }
+
+  // Rekap angsuran bulanan untuk ekspor
+  async rekapAngsuranBulanan(user: JwtUser, bulan: number, tahun: number) {
+    const startDate = new Date(Date.UTC(tahun, bulan - 1, 1));
+    const endDate = new Date(Date.UTC(tahun, bulan, 1));
+
+    const angsuranList = await this.prisma.angsuran.findMany({
+      where: {
+        pinjaman: { anggota: { satminkalId: user.satminkalId } },
+        jatuhTempo: { gte: startDate, lt: endDate },
+      },
+      include: {
+        pinjaman: {
+          include: {
+            anggota: { include: { pangkat: true, korps: true } },
+          },
+        },
+      },
+      orderBy: [{ jatuhTempo: 'asc' }],
+    });
+
+    return angsuranList.map((a) => ({
+      id: a.id,
+      pinjamanId: a.pinjamanId,
+      namaAnggota: a.pinjaman.anggota.nama,
+      nrpNip: a.pinjaman.anggota.nrpNip,
+      pangkat: a.pinjaman.anggota.pangkat?.nama ?? '-',
+      kategoriPangkat: a.pinjaman.anggota.pangkat?.kategori ?? '-',
+      korps: a.pinjaman.anggota.korps?.nama ?? a.pinjaman.anggota.korps?.kode ?? '-',
+      bulanKe: a.bulanKe,
+      jatuhTempo: a.jatuhTempo,
+      pokok: toNumber(a.pokok),
+      bunga: toNumber(a.bunga),
+      total: toNumber(a.total),
+      dibayar: a.dibayar,
+      tanggalBayar: a.tanggalBayar,
+      noInvoice: a.noInvoice,
+    }));
   }
 
   async getPengaturanBunga(user: JwtUser) {
@@ -139,22 +232,42 @@ export class PinjamanService {
         satminkalId: user.satminkalId,
         isAktif: true,
       },
+      include: { pangkat: true },
     });
     if (!anggota) {
       throw new NotFoundException('Anggota aktif tidak ditemukan');
     }
 
-    const activeLoan = await this.prisma.pinjaman.findFirst({
+    // ========== VALIDASI PLAFOND BERDASARKAN KATEGORI PANGKAT ==========
+    const kategori = anggota.pangkat.kategori;
+    const maksPlafond = PLAFOND_MAKS[kategori] ?? 50_000_000;
+
+    // Hitung total pinjaman aktif (belum lunas & belum ditolak)
+    const activeLoans = await this.prisma.pinjaman.findMany({
       where: {
         anggotaId: dto.anggotaId,
-        status: {
-          notIn: [StatusPinjaman.LUNAS, StatusPinjaman.DITOLAK],
-        },
+        status: { notIn: [StatusPinjaman.LUNAS, StatusPinjaman.DITOLAK] },
       },
+      select: { nominal: true, sisaPokok: true },
     });
-    if (activeLoan) {
+
+    const totalPinjamanAktif = activeLoans.reduce((acc, loan) => {
+      return acc + toNumber(loan.sisaPokok ?? loan.nominal);
+    }, 0);
+
+    const totalSetelahPengajuan = totalPinjamanAktif + dto.nominal;
+
+    if (totalSetelahPengajuan > maksPlafond) {
+      const sisaKuota = Math.max(0, maksPlafond - totalPinjamanAktif);
+      const labelKategori = kategori === KategoriPangkat.BINTARA || kategori === KategoriPangkat.BATA_ASN || kategori === KategoriPangkat.PNS
+        ? 'Bintara / PNS / ASN'
+        : 'Perwira';
       throw new BadRequestException(
-        'Anggota masih memiliki pengajuan atau pinjaman yang belum lunas.',
+        `Pengajuan melebihi batas plafond! Kategori ${labelKategori} maks. Rp ${maksPlafond.toLocaleString('id-ID')}. ` +
+        `Pinjaman aktif: Rp ${totalPinjamanAktif.toLocaleString('id-ID')}, ` +
+        `pengajuan baru: Rp ${dto.nominal.toLocaleString('id-ID')}, ` +
+        `total: Rp ${totalSetelahPengajuan.toLocaleString('id-ID')}. ` +
+        `Sisa kuota tersedia: Rp ${sisaKuota.toLocaleString('id-ID')}.`,
       );
     }
 

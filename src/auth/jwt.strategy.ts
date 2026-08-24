@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
 import { SERVER_BOOT_TIME } from './server-boot.constant';
 
 export interface JwtPayload {
@@ -10,12 +11,16 @@ export interface JwtPayload {
   role: string;
   kotamaId?: string;
   satminkalId?: string;
+  sessionToken?: string;
   iat?: number;
 }
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(configService: ConfigService) {
+  constructor(
+    configService: ConfigService,
+    private prisma: PrismaService,
+  ) {
     const secret = configService.get<string>('JWT_SECRET');
     if (!secret) {
       throw new Error('JWT_SECRET is not defined in environment variables');
@@ -28,12 +33,32 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  validate(payload: JwtPayload) {
-    if (payload.iat && payload.iat < SERVER_BOOT_TIME) {
+  async validate(payload: JwtPayload) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, currentSessionToken: true, isActive: true },
+    });
+
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Akun Anda telah dinonaktifkan.');
+    }
+
+    if (
+      payload.sessionToken &&
+      user.currentSessionToken &&
+      payload.sessionToken !== user.currentSessionToken
+    ) {
       throw new UnauthorizedException(
-        'Sesi telah berakhir karena server backend di-restart. Silakan login kembali.',
+        'Akun Anda sedang digunakan di perangkat lain.',
       );
     }
+
+    this.prisma.user
+      .update({
+        where: { id: user.id },
+        data: { lastActiveAt: new Date() },
+      })
+      .catch(() => {});
 
     return {
       id: payload.sub,

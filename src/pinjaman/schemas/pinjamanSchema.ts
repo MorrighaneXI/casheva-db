@@ -21,7 +21,7 @@ export const UpdateStatusPinjamanSchema = z.object({
     'PENDING_JURU_BAYAR',
     'APPROVED_JURU_BAYAR',
     'APPROVED_DAN_SATPAS',
-    'APPROVED_KAPRIM',
+    'APPROVED_KEPRIM',
     'DISBURSED',
     'REJECTED',
   ]),

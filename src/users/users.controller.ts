@@ -33,6 +33,18 @@ export class UsersController {
     return this.usersService.findAll();
   }
 
+  @ApiOperation({ summary: 'Daftar sesi user yang sedang aktif' })
+  @Get('active-sessions')
+  getActiveSessions() {
+    return this.usersService.getActiveSessions();
+  }
+
+  @ApiOperation({ summary: 'Akhiri sesi user tertentu (Admin)' })
+  @Post('terminate-session/:id')
+  terminateSession(@Param('id') id: string) {
+    return this.usersService.terminateSession(id);
+  }
+
   @ApiOperation({ summary: 'Detail user by ID' })
   @Get(':id')
   findOne(@Param('id') id: string) {

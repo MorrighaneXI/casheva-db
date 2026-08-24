@@ -32,9 +32,11 @@ function parseSemicolonCsv(filePath: string): Record<string, string>[] {
 }
 
 function kategoriPangkat(kodePkt: number): KategoriPangkat {
-  if (kodePkt >= 83) return KategoriPangkat.PAMEN;
-  if (kodePkt >= 81) return KategoriPangkat.PAMA;
-  return KategoriPangkat.BATA_ASN;
+  if (kodePkt >= 91) return KategoriPangkat.PATI;       // 91-94: Brigjen, Mayjen, Letjen, Jenderal
+  if (kodePkt >= 81) return KategoriPangkat.PAMEN;      // 81-83: Mayor, Letkol, Kolonel
+  if (kodePkt >= 71) return KategoriPangkat.PAMA;       // 71-73: Letda, Lettu, Kapten
+  if (kodePkt >= 51) return KategoriPangkat.BINTARA;    // 51-66: Prada - Peltu
+  return KategoriPangkat.PNS;                           // 10-44: PNS I/A - IV/D, PPPK
 }
 
 async function main() {
@@ -132,12 +134,12 @@ async function main() {
     throw new Error('Default Kotama / Satminkal tidak ditemukan setelah seed master');
   }
 
-  // 5. USERS DEMO (Admin, Pimpinan, Kaprim, Bendahara, Pengawas, Juru Bayar)
+  // 5. USERS DEMO (Admin, Pimpinan, Keprim, Bendahara, Pengawas, Juru Bayar)
   const passwordHash = await bcrypt.hash('Admin123!', 10);
   const rolesToCreate = [
     { username: 'admin', role: Role.ADMIN_KOPERASI, nama: 'Administrator Koperasi' },
     { username: 'pimpinan', role: Role.PIMPINAN, nama: 'Kolonel Inf Heru (Dan/Ka)' },
-    { username: 'kaprim', role: Role.KAPRIM, nama: 'Letkol Inf Sigit (Kaprim)' },
+    { username: 'keprim', role: Role.KEPRIM, nama: 'Letkol Cba Dedi Kurnia (Keprim)' },
     { username: 'bendahara', role: Role.BENDAHARA, nama: 'Lettu Cku Budi (Bendahara)' },
     { username: 'pengawas', role: Role.PENGAWAS, nama: 'Mayor Inf Tri (Pengawas)' },
     { username: 'jurubayar', role: Role.JURU_BAYAR, nama: 'Serma Agus (Juru Bayar)' },
@@ -156,12 +158,14 @@ async function main() {
       },
       update: {
         password: passwordHash,
+        namaLengkap: u.nama,
+        role: u.role,
         kotamaId: kotamaDefault.id,
         satminkalId: satminkalDefault.id,
       },
     });
   }
-  console.log('👤 Users demo (password: Admin123!): admin, pimpinan, kaprim, bendahara, pengawas, jurubayar');
+  console.log('👤 Users demo (password: Admin123!): admin, pimpinan, keprim, bendahara, pengawas, jurubayar');
 
   // 6. KOPSTUK & TAJUK TANDA TANGAN
   await prisma.kopstuk.upsert({
@@ -214,42 +218,53 @@ async function main() {
   // 7. SEED ANGGOTA DUMMY (Minimal 20 records: 5 Pamen, 5 Pama, 10 Ba/Ta/PNS)
   console.log('🌱 Seed Data 20 Anggota Dummy (5 Pamen, 5 Pama, 10 Ba/Ta/PNS)...');
 
-  // Ambil sampel Pangkat & Korps dari DB
+  // Ambil sampel Pangkat & Korps dari DB (semua kategori)
+  const patiPangkat = await prisma.pangkat.findFirst({ where: { kategori: KategoriPangkat.PATI } });
   const pamenPangkat = await prisma.pangkat.findFirst({ where: { kategori: KategoriPangkat.PAMEN } });
   const pamaPangkat = await prisma.pangkat.findFirst({ where: { kategori: KategoriPangkat.PAMA } });
-  const bataPangkat = await prisma.pangkat.findFirst({ where: { kategori: KategoriPangkat.BATA_ASN } });
+  const bintaraPangkat = await prisma.pangkat.findFirst({ where: { kategori: KategoriPangkat.BINTARA } });
+  const pnsPangkat = await prisma.pangkat.findFirst({ where: { kategori: KategoriPangkat.PNS } });
   const infKorps = await prisma.korps.findFirst({ where: { kode: '1' } }) || (await prisma.korps.findFirst());
+  const cbaKorps = await prisma.korps.findFirst({ where: { kode: 'G' } });
+  const ckeKorps = await prisma.korps.findFirst({ where: { kode: 'N' } });
+  const ckuKorps = await prisma.korps.findFirst({ where: { kode: 'Q' } });
 
-  if (!pamenPangkat || !pamaPangkat || !bataPangkat || !infKorps) {
+  if (!patiPangkat || !pamenPangkat || !pamaPangkat || !bintaraPangkat || !pnsPangkat || !infKorps) {
     throw new Error('Master Pangkat / Korps tidak cukup untuk me-seed anggota');
   }
 
   const dummyAnggotaDefs = [
-    // 5 PAMEN
+    // 2 PATI (Brigjen TNI, Mayjen TNI)
+    { nama: 'Agus Subiyanto', nrp: '1101009901', pkt: patiPangkat.id, crp: infKorps.id },
+    { nama: 'Maruli Simanjuntak', nrp: '1101009902', pkt: patiPangkat.id, crp: infKorps.id },
+
+    // 5 PAMEN (Kolonel Inf, Letkol Cba, Mayor Chk — with korps)
     { nama: 'Sigit Suhendro', nrp: '1102123401', pkt: pamenPangkat.id, crp: infKorps.id },
-    { nama: 'Aan Sugiyanto', nrp: '1103567802', pkt: pamenPangkat.id, crp: infKorps.id },
-    { nama: 'Bambang Kuswanto', nrp: '1104112203', pkt: pamenPangkat.id, crp: infKorps.id },
-    { nama: 'Candra Wijaya', nrp: '1105334404', pkt: pamenPangkat.id, crp: infKorps.id },
+    { nama: 'Aan Sugiyanto', nrp: '1103567802', pkt: pamenPangkat.id, crp: cbaKorps?.id ?? infKorps.id },
+    { nama: 'Bambang Kuswanto', nrp: '1104112203', pkt: pamenPangkat.id, crp: ckeKorps?.id ?? infKorps.id },
+    { nama: 'Candra Wijaya', nrp: '1105334404', pkt: pamenPangkat.id, crp: ckuKorps?.id ?? infKorps.id },
     { nama: 'Dedi Prasetyo', nrp: '1106556605', pkt: pamenPangkat.id, crp: infKorps.id },
 
-    // 5 PAMA
+    // 5 PAMA (Letda Caj, Lettu Inf, Kapten Cke — with korps)
     { nama: 'Eko Yulianto', nrp: '2107778806', pkt: pamaPangkat.id, crp: infKorps.id },
-    { nama: 'Fajar Nugroho', nrp: '2108990007', pkt: pamaPangkat.id, crp: infKorps.id },
-    { nama: 'Gilang Ramadhan', nrp: '2109112208', pkt: pamaPangkat.id, crp: infKorps.id },
-    { nama: 'Heri Susanto', nrp: '2110334409', pkt: pamaPangkat.id, crp: infKorps.id },
+    { nama: 'Fajar Nugroho', nrp: '2108990007', pkt: pamaPangkat.id, crp: cbaKorps?.id ?? infKorps.id },
+    { nama: 'Gilang Ramadhan', nrp: '2109112208', pkt: pamaPangkat.id, crp: ckeKorps?.id ?? infKorps.id },
+    { nama: 'Heri Susanto', nrp: '2110334409', pkt: pamaPangkat.id, crp: ckuKorps?.id ?? infKorps.id },
     { nama: 'Irfan Bachdim', nrp: '2111556610', pkt: pamaPangkat.id, crp: infKorps.id },
 
-    // 10 BA/TA/PNS
-    { nama: 'Joko Widodo', nrp: '3112778811', pkt: bataPangkat.id, crp: infKorps.id },
-    { nama: 'Kurniadi', nrp: '3113990012', pkt: bataPangkat.id, crp: infKorps.id },
-    { nama: 'Lukman Hakim', nrp: '3114112213', pkt: bataPangkat.id, crp: infKorps.id },
-    { nama: 'Mulyadi', nrp: '3115334414', pkt: bataPangkat.id, crp: infKorps.id },
-    { nama: 'Nurdin', nrp: '3116556615', pkt: bataPangkat.id, crp: infKorps.id },
-    { nama: 'Oktavianus', nrp: '3117778816', pkt: bataPangkat.id, crp: infKorps.id },
-    { nama: 'Prabowo Subianto', nrp: '3118990017', pkt: bataPangkat.id, crp: infKorps.id },
-    { nama: 'Qomaruddin', nrp: '3119112218', pkt: bataPangkat.id, crp: infKorps.id },
-    { nama: 'Rudi Hartono', nrp: '3120334419', pkt: bataPangkat.id, crp: infKorps.id },
-    { nama: 'Syafruddin', nrp: '3121556620', pkt: bataPangkat.id, crp: infKorps.id },
+    // 5 BINTARA (Serda - Peltu)
+    { nama: 'Joko Santoso', nrp: '3112778811', pkt: bintaraPangkat.id, crp: infKorps.id },
+    { nama: 'Kurniadi', nrp: '3113990012', pkt: bintaraPangkat.id, crp: infKorps.id },
+    { nama: 'Lukman Hakim', nrp: '3114112213', pkt: bintaraPangkat.id, crp: infKorps.id },
+    { nama: 'Mulyadi', nrp: '3115334414', pkt: bintaraPangkat.id, crp: infKorps.id },
+    { nama: 'Nurdin', nrp: '3116556615', pkt: bintaraPangkat.id, crp: infKorps.id },
+
+    // 5 PNS (PNS I/A - IV/D)
+    { nama: 'Oktavianus', nrp: '3117778816', pkt: pnsPangkat.id, crp: infKorps.id },
+    { nama: 'Putri Rahayu', nrp: '3118990017', pkt: pnsPangkat.id, crp: infKorps.id },
+    { nama: 'Qomaruddin', nrp: '3119112218', pkt: pnsPangkat.id, crp: infKorps.id },
+    { nama: 'Rudi Hartono', nrp: '3120334419', pkt: pnsPangkat.id, crp: infKorps.id },
+    { nama: 'Syafruddin', nrp: '3121556620', pkt: pnsPangkat.id, crp: infKorps.id },
   ];
 
   const createdAnggotaList: any[] = [];
@@ -267,13 +282,33 @@ async function main() {
       },
       update: {
         nama: def.nama,
+        pangkatId: def.pkt,
+        korpsId: def.crp,
         satminkalId: satminkalDefault.id,
       },
       include: { pangkat: true },
     });
     createdAnggotaList.push(a);
+
+    // Auto-create login User account for every Anggota (NRP + password: Admin123!)
+    await prisma.user.upsert({
+      where: { username: def.nrp },
+      create: {
+        username: def.nrp,
+        password: passwordHash,
+        namaLengkap: def.nama.trim(),
+        role: Role.ANGGOTA,
+        kotamaId: kotamaDefault.id,
+        satminkalId: satminkalDefault.id,
+      },
+      update: {
+        namaLengkap: def.nama.trim(),
+        password: passwordHash,
+        role: Role.ANGGOTA,
+      },
+    });
   }
-  console.log(`✅ ${createdAnggotaList.length} Anggota dummy berhasil disiapkan.`);
+  console.log(`✅ ${createdAnggotaList.length} Anggota dummy & Akun Login User (NRP) berhasil disiapkan.`);
 
   // 8. SEED SIMPANAN POKOK & WAJIB (Sekali Awal Masuk)
   console.log('🌱 Seed Simpanan Pokok (Rp 50k) & Wajib (Rp 100k) untuk seluruh anggota...');
@@ -328,8 +363,11 @@ async function main() {
 
       for (const a of createdAnggotaList) {
         let nominalSukarela = 150000; // Ba/Ta/PNS
-        if (a.pangkat.kategori === KategoriPangkat.PAMEN) nominalSukarela = 300000;
+        if (a.pangkat.kategori === KategoriPangkat.PATI) nominalSukarela = 500000;
+        else if (a.pangkat.kategori === KategoriPangkat.PAMEN) nominalSukarela = 300000;
         else if (a.pangkat.kategori === KategoriPangkat.PAMA) nominalSukarela = 250000;
+        else if (a.pangkat.kategori === KategoriPangkat.BINTARA) nominalSukarela = 150000;
+        else if (a.pangkat.kategori === KategoriPangkat.PNS) nominalSukarela = 100000;
 
         sukarelaEntries.push({
           anggotaId: a.id,
@@ -361,7 +399,7 @@ async function main() {
     { anggotaIdx: 2, nominal: 10000000, tenor: 12, status: StatusPinjaman.DICAIRKAN, paidMonths: 4 },
     { anggotaIdx: 3, nominal: 8000000, tenor: 10, status: StatusPinjaman.LUNAS, paidMonths: 10 },
     { anggotaIdx: 4, nominal: 5000000, tenor: 6, status: StatusPinjaman.DICAIRKAN, paidMonths: 2 },
-    { anggotaIdx: 5, nominal: 12000000, tenor: 24, status: StatusPinjaman.SETUJU_KAPRIM, paidMonths: 0 },
+    { anggotaIdx: 5, nominal: 12000000, tenor: 24, status: StatusPinjaman.SETUJU_KEPRIM, paidMonths: 0 },
     { anggotaIdx: 6, nominal: 7000000, tenor: 12, status: StatusPinjaman.REKOMENDASI_PIMPINAN, paidMonths: 0 },
     { anggotaIdx: 7, nominal: 4000000, tenor: 6, status: StatusPinjaman.VERIFIKASI_JURU_BAYAR, paidMonths: 0 },
     { anggotaIdx: 8, nominal: 3000000, tenor: 6, status: StatusPinjaman.VERIFIKASI_PRIMKOP, paidMonths: 0 },
@@ -403,8 +441,8 @@ async function main() {
           const isPaid = b < cfg.paidMonths;
           const jatuh = new Date(tglCair.getFullYear(), tglCair.getMonth() + row.bulanKe, 5);
           const tglBayar = isPaid ? new Date(tglCair.getFullYear(), tglCair.getMonth() + row.bulanKe, 3) : null;
-          const seq = String(idx * 100 + row.bulanKe).padStart(6, '0');
-          const invoiceNo = isPaid ? `KW-2025-579276-${seq}` : null;
+          const seq = String((idx + 1) * 1000 + row.bulanKe).padStart(6, '0');
+          const invoiceNo = isPaid ? `KW-2025-579276-S${seq}` : null;
 
           angsuranData.push({
             pinjamanId: p.id,
