@@ -84,6 +84,29 @@ export class PinjamanController {
     return this.pinjamanService.updatePengaturanBunga(user, dto);
   }
 
+  @Get('plafond/:anggotaId')
+  @ApiOperation({ summary: 'Cek sisa kuota plafond pinjaman anggota (berdasarkan pangkat)' })
+  @ApiResponse({ status: 200, description: 'Info plafond pinjaman anggota' })
+  getPlafondInfo(
+    @CurrentUser() user: JwtUser,
+    @Param('anggotaId') anggotaId: string,
+  ) {
+    return this.pinjamanService.getPlafondInfo(user, anggotaId);
+  }
+
+  @Get('rekap-angsuran-bulanan')
+  @ApiOperation({ summary: 'Rekap angsuran bulanan (filter bulan & tahun) untuk ekspor' })
+  @ApiQuery({ name: 'bulan', required: true, type: Number })
+  @ApiQuery({ name: 'tahun', required: true, type: Number })
+  @ApiResponse({ status: 200, description: 'List angsuran bulanan' })
+  rekapAngsuranBulanan(
+    @CurrentUser() user: JwtUser,
+    @Query('bulan') bulan: string,
+    @Query('tahun') tahun: string,
+  ) {
+    return this.pinjamanService.rekapAngsuranBulanan(user, +bulan, +tahun);
+  }
+
   @Post('angsuran/:angsuranId/bayar')
   @ApiOperation({ summary: 'Bayar angsuran + terbitkan no invoice/kwitansi' })
   @ApiResponse({ status: 200, description: 'Angsuran berhasil dibayar' })

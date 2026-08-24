@@ -7,6 +7,7 @@ import {
   JenisSimpanan,
   JenisTransaksiSimpanan,
   KategoriPangkat,
+  Role,
 } from '@prisma/client';
 import {
   SIMPANAN_POKOK,
@@ -33,7 +34,11 @@ export class SimpananService {
   async rekapSatminkal(user: JwtUser) {
     const anggota = await this.prisma.anggota.findMany({
       where: { satminkalId: user.satminkalId, isAktif: true },
-      select: { id: true, nama: true, nrpNip: true },
+      include: {
+        pangkat: true,
+        korps: true,
+        satminkal: true,
+      },
     });
     const ids = anggota.map((a) => a.id);
 
@@ -59,13 +64,25 @@ export class SimpananService {
       const totalPokok = calculateTotal(JenisSimpanan.POKOK);
       const totalWajib = calculateTotal(JenisSimpanan.WAJIB);
       const totalSukarela = calculateTotal(JenisSimpanan.SUKARELA);
+      const totalKhusus = calculateTotal(JenisSimpanan.KHUSUS);
 
       return {
-        ...a,
+        id: a.id,
+        anggotaId: a.id,
+        nama: a.nama,
+        nrpNip: a.nrpNip,
+        pangkat: a.pangkat?.nama ?? '-',
+        kategoriPangkat: a.pangkat?.kategori ?? '-',
+        korps: a.korps?.nama ?? a.korps?.kode ?? '-',
+        satminkal: a.satminkal?.nama ?? 'Disinfolahtad',
         totalPokok,
         totalWajib,
         totalSukarela,
-        totalSimpanan: totalPokok + totalWajib + totalSukarela,
+        totalKhusus,
+        simpananPokok: totalPokok,
+        simpananWajib: totalWajib,
+        simpananSukarela: totalSukarela + totalKhusus,
+        totalSimpanan: totalPokok + totalWajib + totalSukarela + totalKhusus,
       };
     });
   }
@@ -85,21 +102,28 @@ export class SimpananService {
       );
     }
 
+    // Ambil nominal dinamis dari pengaturan koperasi
+    const setting = await this.prisma.pengaturanKoperasi.findUnique({
+      where: { satminkalId: user.satminkalId },
+    });
+    const nominalPokok = setting ? toNumber(setting.nominalSimpananPokok) : SIMPANAN_POKOK;
+    const nominalWajib = setting ? toNumber(setting.nominalSimpananWajib) : SIMPANAN_WAJIB;
+
     await this.prisma.simpanan.createMany({
       data: [
         {
           anggotaId,
           jenis: JenisSimpanan.POKOK,
           tipe: JenisTransaksiSimpanan.SETOR,
-          nominal: decimal(SIMPANAN_POKOK),
-          keterangan: 'Simpanan pokok awal',
+          nominal: decimal(nominalPokok),
+          keterangan: `Simpanan pokok awal (Rp ${nominalPokok.toLocaleString('id-ID')})`,
         },
         {
           anggotaId,
           jenis: JenisSimpanan.WAJIB,
           tipe: JenisTransaksiSimpanan.SETOR,
-          nominal: decimal(SIMPANAN_WAJIB),
-          keterangan: 'Simpanan wajib awal',
+          nominal: decimal(nominalWajib),
+          keterangan: `Simpanan wajib awal (Rp ${nominalWajib.toLocaleString('id-ID')})`,
         },
       ],
     });
@@ -107,9 +131,113 @@ export class SimpananService {
     return {
       message: 'Simpanan pokok & wajib berhasil dicatat',
       anggota: anggota.nama,
-      pokok: SIMPANAN_POKOK,
-      wajib: SIMPANAN_WAJIB,
+      pokok: nominalPokok,
+      wajib: nominalWajib,
     };
+  }
+
+  // ========== PENGATURAN SIMPANAN DINAMIS (Bendahara / Admin) ==========
+
+  async getPengaturanSimpanan(user: JwtUser) {
+    const setting = await this.prisma.pengaturanKoperasi.findUnique({
+      where: { satminkalId: user.satminkalId },
+    });
+    return {
+      nominalSimpananPokok: setting ? toNumber(setting.nominalSimpananPokok) : SIMPANAN_POKOK,
+      nominalSimpananWajib: setting ? toNumber(setting.nominalSimpananWajib) : SIMPANAN_WAJIB,
+      nominalSimpananKhusus: setting ? toNumber(setting.nominalSimpananKhusus) : 0,
+      updatedAt: setting?.updatedAt ?? null,
+    };
+  }
+
+  async updatePengaturanSimpanan(
+    user: JwtUser,
+    dto: { nominalPokok?: number; nominalWajib?: number; nominalKhusus?: number },
+  ) {
+    const data: any = {};
+    if (dto.nominalPokok !== undefined) data.nominalSimpananPokok = decimal(dto.nominalPokok);
+    if (dto.nominalWajib !== undefined) data.nominalSimpananWajib = decimal(dto.nominalWajib);
+    if (dto.nominalKhusus !== undefined) data.nominalSimpananKhusus = decimal(dto.nominalKhusus);
+
+    const setting = await this.prisma.pengaturanKoperasi.upsert({
+      where: { satminkalId: user.satminkalId },
+      create: {
+        satminkalId: user.satminkalId,
+        ...data,
+      },
+      update: data,
+    });
+
+    return {
+      message: 'Pengaturan nominal simpanan berhasil diperbarui',
+      nominalSimpananPokok: toNumber(setting.nominalSimpananPokok),
+      nominalSimpananWajib: toNumber(setting.nominalSimpananWajib),
+      nominalSimpananKhusus: toNumber(setting.nominalSimpananKhusus),
+      updatedAt: setting.updatedAt,
+    };
+  }
+
+  // ========== SETOR SIMPANAN (Bendahara / Admin) ==========
+
+  async setorSimpanan(
+    user: JwtUser,
+    dto: {
+      anggotaId: string;
+      jenis: JenisSimpanan;
+      nominal: number;
+      keterangan?: string;
+    },
+  ) {
+    await this.assertAnggotaScope(user, dto.anggotaId);
+
+    if (dto.nominal <= 0) {
+      throw new BadRequestException('Nominal setoran harus lebih dari 0');
+    }
+
+    return this.prisma.simpanan.create({
+      data: {
+        anggotaId: dto.anggotaId,
+        jenis: dto.jenis,
+        tipe: JenisTransaksiSimpanan.SETOR,
+        nominal: decimal(dto.nominal),
+        periode: new Date(),
+        keterangan: dto.keterangan ?? `Setoran simpanan ${dto.jenis.toLowerCase()}`,
+      },
+    });
+  }
+
+  // ========== REKAP SIMPANAN BULANAN ==========
+
+  async rekapSimpananBulanan(user: JwtUser, bulan: number, tahun: number) {
+    const startDate = new Date(Date.UTC(tahun, bulan - 1, 1));
+    const endDate = new Date(Date.UTC(tahun, bulan, 1));
+
+    const simpananList = await this.prisma.simpanan.findMany({
+      where: {
+        anggota: { satminkalId: user.satminkalId },
+        createdAt: { gte: startDate, lt: endDate },
+      },
+      include: {
+        anggota: { include: { pangkat: true, korps: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return simpananList.map((s) => ({
+      id: s.id,
+      namaAnggota: s.anggota.nama,
+      nrpNip: s.anggota.nrpNip,
+      pangkat: s.anggota.pangkat?.nama ?? '-',
+      kategoriPangkat: s.anggota.pangkat?.kategori ?? '-',
+      korps: s.anggota.korps?.nama ?? s.anggota.korps?.kode ?? '-',
+      jenis: s.jenis,
+      tipe: s.tipe,
+      nominal: toNumber(s.nominal),
+      tanggal: s.createdAt,
+      periode: s.periode,
+      keterangan: s.keterangan,
+      noInvoice: s.noInvoice,
+    }));
   }
 
   // Optimasi Batch Insert (Mencegah N+1 Query)
@@ -224,6 +352,9 @@ export class SimpananService {
     });
     if (!anggota) {
       throw new NotFoundException('Anggota tidak ditemukan di Satminkal Anda');
+    }
+    if (user.role === Role.ANGGOTA && anggota.nrpNip !== user.username) {
+      throw new BadRequestException('Anda hanya diizinkan mengakses data akun Anda sendiri');
     }
     return anggota;
   }

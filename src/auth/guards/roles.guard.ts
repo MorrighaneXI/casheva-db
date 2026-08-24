@@ -28,9 +28,13 @@ export class RolesGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<RequestWithUser>();
     const user = request.user;
-
     if (!user || !user.role) {
       return false;
+    }
+
+    // Admin Koperasi has universal access to all endpoints
+    if (user.role === Role.ADMIN_KOPERASI) {
+      return true;
     }
 
     return requiredRoles.includes(user.role);

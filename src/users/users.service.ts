@@ -18,18 +18,37 @@ export class UsersService {
       where: { username: dto.username },
     });
     if (existing) {
-      throw new ConflictException('Username sudah digunakan');
+      throw new ConflictException('Username / NRP sudah digunakan');
+    }
+
+    let kotamaId = dto.kotamaId;
+    if (!kotamaId && dto.satminkalId) {
+      const satminkal = await this.prisma.satminkal.findUnique({
+        where: { id: dto.satminkalId },
+      });
+      if (satminkal) {
+        kotamaId = satminkal.kotamaId;
+      }
+    }
+
+    if (!kotamaId) {
+      const firstKotama = await this.prisma.kotama.findFirst();
+      kotamaId = firstKotama?.id;
+    }
+
+    if (!kotamaId) {
+      throw new NotFoundException('Kotama tidak ditemukan');
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
-    return this.prisma.user.create({
+    const user = await this.prisma.user.create({
       data: {
         username: dto.username,
         password: hashedPassword,
         namaLengkap: dto.namaLengkap,
         role: dto.role,
-        kotama: { connect: { id: dto.kotamaId } },
+        kotama: { connect: { id: kotamaId } },
         satminkal: { connect: { id: dto.satminkalId } },
       },
       select: {
@@ -43,6 +62,42 @@ export class UsersService {
         createdAt: true,
       },
     });
+
+    // If role is ANGGOTA or pangkatId is provided, also ensure Anggota record exists
+    if (dto.role === 'ANGGOTA' || dto.pangkatId || dto.nrpNip) {
+      const nrpNip = dto.nrpNip || dto.username;
+      const existingAnggota = await this.prisma.anggota.findFirst({
+        where: { nrpNip },
+      });
+
+      if (!existingAnggota) {
+        let pangkatId = dto.pangkatId;
+        if (!pangkatId) {
+          const firstPangkat = await this.prisma.pangkat.findFirst();
+          pangkatId = firstPangkat?.id;
+        }
+
+        let korpsId = dto.korpsId;
+        if (!korpsId) {
+          const firstKorps = await this.prisma.korps.findFirst();
+          korpsId = firstKorps?.id;
+        }
+
+        if (pangkatId && korpsId) {
+          await this.prisma.anggota.create({
+            data: {
+              nama: dto.namaLengkap,
+              nrpNip,
+              pangkatId,
+              korpsId,
+              satminkalId: dto.satminkalId,
+            },
+          });
+        }
+      }
+    }
+
+    return user;
   }
 
   async findAll() {
@@ -119,11 +174,48 @@ export class UsersService {
     await this.findOne(id);
     return this.prisma.user.update({
       where: { id },
-      data: { isActive: false },
+      data: { isActive: false, currentSessionToken: null },
       select: {
         id: true,
         isActive: true,
       },
     });
+  }
+
+  async getActiveSessions() {
+    const users = await this.prisma.user.findMany({
+      where: {
+        isActive: true,
+        currentSessionToken: { not: null },
+      },
+      select: {
+        id: true,
+        username: true,
+        namaLengkap: true,
+        role: true,
+        lastActiveAt: true,
+        satminkal: { select: { nama: true } },
+      },
+      orderBy: { lastActiveAt: 'desc' },
+    });
+    return users.map((u) => ({
+      id: u.id,
+      username: u.username,
+      namaLengkap: u.namaLengkap,
+      role: u.role,
+      satminkal: u.satminkal.nama,
+      lastActiveAt: u.lastActiveAt,
+      isOnline: u.lastActiveAt
+        ? Date.now() - new Date(u.lastActiveAt).getTime() < 1000 * 60 * 15
+        : false,
+    }));
+  }
+
+  async terminateSession(id: string) {
+    await this.prisma.user.update({
+      where: { id },
+      data: { currentSessionToken: null },
+    });
+    return { message: 'Sesi berhasil diakhiri' };
   }
 }

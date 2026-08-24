@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { JenisSimpanan } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtUser } from '../common/interfaces/jwt-user.interface';
 import { SimpananMassalDto } from './dto/simpanan-massal.dto';
@@ -19,6 +20,33 @@ export class SimpananController {
     return this.simpananService.rekapSatminkal(user);
   }
 
+  @Get('pengaturan')
+  @ApiOperation({ summary: 'Lihat pengaturan nominal simpanan pokok/wajib/khusus aktif' })
+  getPengaturanSimpanan(@CurrentUser() user: JwtUser) {
+    return this.simpananService.getPengaturanSimpanan(user);
+  }
+
+  @Patch('pengaturan')
+  @ApiOperation({ summary: 'Ubah nominal simpanan pokok/wajib/khusus (oleh Bendahara/Admin)' })
+  updatePengaturanSimpanan(
+    @CurrentUser() user: JwtUser,
+    @Body() dto: { nominalPokok?: number; nominalWajib?: number; nominalKhusus?: number },
+  ) {
+    return this.simpananService.updatePengaturanSimpanan(user, dto);
+  }
+
+  @Get('rekap-bulanan')
+  @ApiOperation({ summary: 'Rekap simpanan bulanan (filter bulan & tahun) untuk ekspor' })
+  @ApiQuery({ name: 'bulan', required: true, type: Number })
+  @ApiQuery({ name: 'tahun', required: true, type: Number })
+  rekapBulanan(
+    @CurrentUser() user: JwtUser,
+    @Query('bulan') bulan: string,
+    @Query('tahun') tahun: string,
+  ) {
+    return this.simpananService.rekapSimpananBulanan(user, +bulan, +tahun);
+  }
+
   @Get('anggota/:anggotaId')
   @ApiOperation({ summary: 'Riwayat simpanan satu anggota' })
   byAnggota(
@@ -30,7 +58,7 @@ export class SimpananController {
 
   @Post('pokok-wajib/:anggotaId')
   @ApiOperation({
-    summary: 'Catat simpanan pokok (50rb) & wajib (100rb) pertama kali',
+    summary: 'Catat simpanan pokok & wajib pertama kali (nominal dinamis)',
   })
   pokokWajib(
     @CurrentUser() user: JwtUser,
@@ -45,5 +73,16 @@ export class SimpananController {
   })
   sukarelaMassal(@CurrentUser() user: JwtUser, @Body() dto: SimpananMassalDto) {
     return this.simpananService.sukarelaMassal(user, dto);
+  }
+
+  @Post('setor')
+  @ApiOperation({
+    summary: 'Setor simpanan anggota (Sukarela/Khusus/Pokok/Wajib) oleh Bendahara',
+  })
+  setorSimpanan(
+    @CurrentUser() user: JwtUser,
+    @Body() dto: { anggotaId: string; jenis: JenisSimpanan; nominal: number; keterangan?: string },
+  ) {
+    return this.simpananService.setorSimpanan(user, dto);
   }
 }

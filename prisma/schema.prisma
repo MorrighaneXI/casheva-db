@@ -65,9 +65,12 @@ model Korps {
 }
 
 enum KategoriPangkat {
+  PATI
   PAMEN
   PAMA
+  BINTARA
   BATA_ASN
+  PNS
 }
 
 // ==========================================
@@ -77,7 +80,7 @@ enum KategoriPangkat {
 enum Role {
   ADMIN_KOPERASI
   PIMPINAN
-  KAPRIM
+  KEPRIM
   BENDAHARA
   PENGAWAS
   ANGGOTA
@@ -85,18 +88,20 @@ enum Role {
 }
 
 model User {
-  id          String    @id @default(uuid())
-  username    String    @unique
-  password    String
-  namaLengkap String
-  role        Role      @default(ADMIN_KOPERASI)
-  kotamaId    String
-  kotama      Kotama    @relation(fields: [kotamaId], references: [id])
-  satminkalId String
-  satminkal   Satminkal @relation(fields: [satminkalId], references: [id])
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                  String    @id @default(uuid())
+  username            String    @unique
+  password            String
+  namaLengkap         String
+  role                Role      @default(ADMIN_KOPERASI)
+  kotamaId            String
+  kotama              Kotama    @relation(fields: [kotamaId], references: [id])
+  satminkalId         String
+  satminkal           Satminkal @relation(fields: [satminkalId], references: [id])
+  isActive            Boolean   @default(true)
+  currentSessionToken String?
+  lastActiveAt        DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   @@index([kotamaId])
   @@index([satminkalId])
@@ -133,9 +138,10 @@ model Anggota {
 // ==========================================
 
 enum JenisSimpanan {
-  POKOK // Rp 50.000 (sekali)
-  WAJIB // Rp 100.000 (sekali/rutin)
+  POKOK // Rp 50.000 (sekali / dinamis)
+  WAJIB // Rp 100.000 (sekali/rutin / dinamis)
   SUKARELA // Tabungan bebas per bulan
+  KHUSUS // Simpanan Khusus (Qurban/Hari Raya/kegiatan khusus)
 }
 
 enum JenisTransaksiSimpanan {
@@ -168,7 +174,7 @@ enum StatusPinjaman {
   VERIFIKASI_PRIMKOP
   VERIFIKASI_JURU_BAYAR
   REKOMENDASI_PIMPINAN
-  SETUJU_KAPRIM
+  SETUJU_KEPRIM
   DITOLAK
   MENUNGGU_DOKUMEN
   DICAIRKAN
@@ -339,6 +345,9 @@ model PengaturanKoperasi {
   satminkalId              String    @unique
   satminkal                Satminkal @relation(fields: [satminkalId], references: [id], onDelete: Cascade)
   bungaPinjamanPersenTahun Decimal   @default(12) @db.Decimal(5, 2)
+  nominalSimpananPokok     Decimal   @default(50000) @db.Decimal(18, 2)
+  nominalSimpananWajib     Decimal   @default(100000) @db.Decimal(18, 2)
+  nominalSimpananKhusus    Decimal   @default(0) @db.Decimal(18, 2)
   updatedAt                DateTime  @updatedAt
   createdAt                DateTime  @default(now())
 

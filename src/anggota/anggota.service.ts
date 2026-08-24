@@ -1,4 +1,4 @@
-import { StatusPinjaman } from '@prisma/client';
+import { Role, StatusPinjaman } from '@prisma/client';
 import {
   ConflictException,
   ForbiddenException,
@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { JwtUser } from '../common/interfaces/jwt-user.interface';
 import { CreateAnggotaDto } from './dto/create-anggota.dto';
 import { UpdateAnggotaDto } from './dto/update-anggota.dto';
+import * as bcrypt from 'bcrypt';
 
 const anggotaInclude = {
   pangkat: true,
@@ -58,17 +59,43 @@ export class AnggotaService {
       );
     }
 
-    return this.prisma.anggota.create({
+    const satminkalId = this.scopeSatminkal(user);
+    const createdAnggota = await this.prisma.anggota.create({
       data: {
         nama: dto.nama,
         nrpNip: dto.nrpNip,
         pangkatId: dto.pangkatId,
         korpsId: dto.korpsId,
-        satminkalId: this.scopeSatminkal(user),
+        satminkalId,
         tmtAnggota: dto.tmtAnggota ? new Date(dto.tmtAnggota) : undefined,
       },
       include: anggotaInclude,
     });
+
+    // Auto-create login account (User) with username = NRP and default password Admin123!
+    const existingUser = await this.prisma.user.findUnique({
+      where: { username: dto.nrpNip },
+    });
+    if (!existingUser) {
+      const defaultPasswordHash = await bcrypt.hash('Admin123!', 10);
+      const satminkal = await this.prisma.satminkal.findUnique({
+        where: { id: satminkalId },
+      });
+      if (satminkal) {
+        await this.prisma.user.create({
+          data: {
+            username: dto.nrpNip,
+            password: defaultPasswordHash,
+            namaLengkap: dto.nama,
+            role: Role.ANGGOTA,
+            kotamaId: satminkal.kotamaId,
+            satminkalId: satminkal.id,
+          },
+        });
+      }
+    }
+
+    return createdAnggota;
   }
 
   async update(user: JwtUser, id: string, dto: UpdateAnggotaDto) {
