@@ -27,6 +27,7 @@ export class SimpananController {
   }
 
   @Patch('pengaturan')
+  @Post('pengaturan')
   @ApiOperation({ summary: 'Ubah nominal simpanan pokok/wajib/khusus (oleh Bendahara/Admin)' })
   updatePengaturanSimpanan(
     @CurrentUser() user: JwtUser,

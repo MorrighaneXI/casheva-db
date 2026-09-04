@@ -192,6 +192,8 @@ model Pinjaman {
   tanggalAjuan     DateTime          @default(now())
   tanggalCair      DateTime?
   sisaPokok        Decimal?          @db.Decimal(18, 2)
+  catatan          String?
+  alasanPenolakan  String?
   angsuran         Angsuran[]
   dokumen          DokumenPinjaman[]
   createdAt        DateTime          @default(now())

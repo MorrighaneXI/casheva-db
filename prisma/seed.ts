@@ -123,11 +123,17 @@ async function main() {
     korpsIdByKode.set(kode, saved.id);
   }
 
-  const kotamaDefault = await prisma.kotama.findUnique({
-    where: { kode: '01' },
+  // Kotama KODAM IV/DIPONEGORO & Satminkal INFOLAHTADAM IV/DIPONEGORO
+  const kotamaDefault = await prisma.kotama.upsert({
+    where: { kode: '07' },
+    create: { kode: '07', nama: 'KODAM IV/DIPONEGORO' },
+    update: { nama: 'KODAM IV/DIPONEGORO' },
   });
-  const satminkalDefault = await prisma.satminkal.findUnique({
-    where: { kode: '579276' },
+
+  const satminkalDefault = await prisma.satminkal.upsert({
+    where: { kode: '685600' },
+    create: { kode: '685600', nama: 'INFOLAHTADAM IV/DIPONEGORO', kotamaId: kotamaDefault.id },
+    update: { nama: 'INFOLAHTADAM IV/DIPONEGORO', kotamaId: kotamaDefault.id },
   });
 
   if (!kotamaDefault || !satminkalDefault) {
@@ -172,14 +178,16 @@ async function main() {
     where: { satminkalId: satminkalDefault.id },
     create: {
       satminkalId: satminkalDefault.id,
-      namaSatuan: 'MARKAS BESAR ANGKATAN DARAT',
-      namaBalak: 'DINAS INFORMASI DAN PENGOLAHAN DATA',
-      alamat: 'Jl. Veteran No. 5, Jakarta Pusat',
-      nomorTelepon: '021-3840123',
+      namaSatuan: 'KOMANDO DAERAH MILITER IV/DIPONEGORO',
+      namaBalak: 'INFORMASI DAN PENGOLAHAN DATA',
+      alamat: 'Jl. Perintis Kemerdekaan, Watugong, Semarang',
+      nomorTelepon: '024-7472249',
     },
     update: {
-      namaSatuan: 'MARKAS BESAR ANGKATAN DARAT',
-      namaBalak: 'DINAS INFORMASI DAN PENGOLAHAN DATA',
+      namaSatuan: 'KOMANDO DAERAH MILITER IV/DIPONEGORO',
+      namaBalak: 'INFORMASI DAN PENGOLAHAN DATA',
+      alamat: 'Jl. Perintis Kemerdekaan, Watugong, Semarang',
+      nomorTelepon: '024-7472249',
     },
   });
 

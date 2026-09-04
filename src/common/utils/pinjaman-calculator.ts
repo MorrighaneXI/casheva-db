@@ -40,8 +40,8 @@ export function validasiPinjaman(
   nominal: number,
   tenorBulan: number,
 ): string | null {
-  if (nominal < 1_000_000 || nominal > 20_000_000) {
-    return 'Nominal pinjaman harus antara Rp 1.000.000 dan Rp 20.000.000';
+  if (nominal < 1_000_000 || nominal > 100_000_000) {
+    return 'Nominal pinjaman harus antara Rp 1.000.000 dan Rp 100.000.000';
   }
   if (tenorBulan < 1 || tenorBulan > 36) {
     return 'Tenor pinjaman maksimal 36 bulan';

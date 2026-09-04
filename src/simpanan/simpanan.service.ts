@@ -74,7 +74,7 @@ export class SimpananService {
         pangkat: a.pangkat?.nama ?? '-',
         kategoriPangkat: a.pangkat?.kategori ?? '-',
         korps: a.korps?.nama ?? a.korps?.kode ?? '-',
-        satminkal: a.satminkal?.nama ?? 'Disinfolahtad',
+        satminkal: a.satminkal?.nama ?? 'INFOLAHTADAM IV/DIPONEGORO',
         totalPokok,
         totalWajib,
         totalSukarela,
@@ -240,9 +240,9 @@ export class SimpananService {
     }));
   }
 
-  // Optimasi Batch Insert (Mencegah N+1 Query)
-  async sukarelaMassal(user: JwtUser, dto: SimpananMassalDto) {
-    const periode = this.normalizeTanggal5(dto.periode);
+  async sukarelaMassal(user: JwtUser, dto?: SimpananMassalDto) {
+    const rawDate = dto?.periode || new Date().toISOString().slice(0, 10);
+    const periode = this.normalizeTanggal5(rawDate);
 
     const anggotaList = await this.prisma.anggota.findMany({
       where: { satminkalId: user.satminkalId, isAktif: true },

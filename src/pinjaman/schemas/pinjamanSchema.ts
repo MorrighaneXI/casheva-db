@@ -5,7 +5,7 @@ export const CreatePinjamanSchema = z.object({
   nominalPinjaman: z
     .number()
     .min(1000000, { message: 'Nominal pinjaman minimal Rp 1.000.000' })
-    .max(20000000, { message: 'Nominal pinjaman maksimal Rp 20.000.000' }),
+    .max(100000000, { message: 'Nominal pinjaman maksimal Rp 100.000.000' }),
   tenorBulan: z
     .number()
     .int()
@@ -13,7 +13,9 @@ export const CreatePinjamanSchema = z.object({
     .max(36, { message: 'Tenor maksimal 36 bulan' }),
   tujuanPinjaman: z
     .string()
-    .min(5, { message: 'Tujuan pinjaman harus diisi secara jelas' }),
+    .min(3, { message: 'Tujuan pinjaman harus diisi secara jelas' })
+    .optional(),
+  catatan: z.string().optional(),
 });
 
 export const UpdateStatusPinjamanSchema = z.object({
