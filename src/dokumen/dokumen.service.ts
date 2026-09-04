@@ -32,7 +32,10 @@ export class DokumenService {
     }
 
     const pinjaman = await this.prisma.pinjaman.findFirst({
-      where: { id: pinjamanId, anggota: { satminkalId: user.satminkalId } },
+      where: {
+        id: pinjamanId,
+        ...(user?.satminkalId ? { anggota: { satminkalId: user.satminkalId } } : {}),
+      },
     });
     if (!pinjaman) {
       throw new NotFoundException('Pinjaman tidak ditemukan');
@@ -41,31 +44,51 @@ export class DokumenService {
     // Stream upload directly to Cloudinary
     const cloudinaryRes = await this.cloudinaryService.uploadFile(
       file,
-      'casheva/dokumen',
+      'dokumen',
     );
     const fileUrl = cloudinaryRes.secure_url || cloudinaryRes.url;
 
-    const doc = await this.prisma.dokumenPinjaman.create({
-      data: {
-        pinjamanId,
-        jenis: jenis || 'Dokumen Pendukung',
-        filePath: fileUrl,
-      },
+    // Check if doc with this jenis already exists for this loan to upsert cleanly
+    const existingDoc = await this.prisma.dokumenPinjaman.findFirst({
+      where: { pinjamanId, jenis },
     });
+
+    let doc;
+    if (existingDoc) {
+      doc = await this.prisma.dokumenPinjaman.update({
+        where: { id: existingDoc.id },
+        data: {
+          filePath: fileUrl,
+          uploadedAt: new Date(),
+        },
+      });
+    } else {
+      doc = await this.prisma.dokumenPinjaman.create({
+        data: {
+          pinjamanId,
+          jenis: jenis || 'Dokumen Pendukung',
+          filePath: fileUrl,
+        },
+      });
+    }
 
     return {
       ...doc,
       cloudinary: {
-        publicId: cloudinaryRes.public_id,
-        bytes: cloudinaryRes.bytes,
-        format: cloudinaryRes.format,
+        publicId: (cloudinaryRes as any).public_id,
+        bytes: (cloudinaryRes as any).bytes,
+        format: (cloudinaryRes as any).format,
+        secureUrl: fileUrl,
       },
     };
   }
 
   async listDokumen(user: JwtUser, pinjamanId: string) {
     const pinjaman = await this.prisma.pinjaman.findFirst({
-      where: { id: pinjamanId, anggota: { satminkalId: user.satminkalId } },
+      where: {
+        id: pinjamanId,
+        ...(user?.satminkalId ? { anggota: { satminkalId: user.satminkalId } } : {}),
+      },
     });
     if (!pinjaman) {
       throw new NotFoundException('Pinjaman tidak ditemukan');

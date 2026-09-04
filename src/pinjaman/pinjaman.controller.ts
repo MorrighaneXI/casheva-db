@@ -75,6 +75,7 @@ export class PinjamanController {
   }
 
   @Patch('pengaturan-bunga')
+  @Post('pengaturan-bunga')
   @ApiOperation({ summary: 'Ubah suku bunga pinjaman aktif Satminkal (oleh Bendahara)' })
   @ApiResponse({ status: 200, description: 'Suku bunga berhasil diperbarui' })
   updatePengaturanBunga(

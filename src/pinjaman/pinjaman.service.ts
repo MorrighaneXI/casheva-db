@@ -22,31 +22,45 @@ import {
 const pinjamanInclude = {
   anggota: { include: { pangkat: true, korps: true } },
   angsuran: { orderBy: { bulanKe: 'asc' as const } },
+  dokumen: { orderBy: { uploadedAt: 'desc' as const } },
 } as const;
 
 const ALLOWED_TRANSITIONS: Partial<Record<StatusPinjaman, StatusPinjaman[]>> = {
   [StatusPinjaman.DIAJUKAN]: [
     StatusPinjaman.VERIFIKASI_PRIMKOP,
     StatusPinjaman.VERIFIKASI_JURU_BAYAR,
+    StatusPinjaman.REKOMENDASI_PIMPINAN,
+    StatusPinjaman.SETUJU_KEPRIM,
     StatusPinjaman.DITOLAK,
   ],
   [StatusPinjaman.VERIFIKASI_PRIMKOP]: [
     StatusPinjaman.VERIFIKASI_JURU_BAYAR,
+    StatusPinjaman.REKOMENDASI_PIMPINAN,
+    StatusPinjaman.SETUJU_KEPRIM,
     StatusPinjaman.DITOLAK,
   ],
   [StatusPinjaman.VERIFIKASI_JURU_BAYAR]: [
     StatusPinjaman.REKOMENDASI_PIMPINAN,
+    StatusPinjaman.SETUJU_KEPRIM,
     StatusPinjaman.DITOLAK,
   ],
   [StatusPinjaman.REKOMENDASI_PIMPINAN]: [
     StatusPinjaman.SETUJU_KEPRIM,
+    StatusPinjaman.MENUNGGU_DOKUMEN,
+    StatusPinjaman.DICAIRKAN,
     StatusPinjaman.DITOLAK,
   ],
   [StatusPinjaman.SETUJU_KEPRIM]: [
     StatusPinjaman.MENUNGGU_DOKUMEN,
+    StatusPinjaman.DICAIRKAN,
     StatusPinjaman.DITOLAK,
   ],
-  [StatusPinjaman.MENUNGGU_DOKUMEN]: [StatusPinjaman.DICAIRKAN],
+  [StatusPinjaman.MENUNGGU_DOKUMEN]: [
+    StatusPinjaman.SETUJU_KEPRIM,
+    StatusPinjaman.DICAIRKAN,
+    StatusPinjaman.DITOLAK,
+  ],
+  [StatusPinjaman.DICAIRKAN]: [StatusPinjaman.LUNAS],
 };
 
 // Plafond maksimal pinjaman berdasarkan kategori pangkat
@@ -238,6 +252,10 @@ export class PinjamanService {
       throw new NotFoundException('Anggota aktif tidak ditemukan');
     }
 
+    if (user.role === Role.ANGGOTA && anggota.nrpNip !== user.username) {
+      throw new BadRequestException('Anggota hanya dapat mengajukan pinjaman untuk dirinya sendiri');
+    }
+
     // ========== VALIDASI PLAFOND BERDASARKAN KATEGORI PANGKAT ==========
     const kategori = anggota.pangkat.kategori;
     const maksPlafond = PLAFOND_MAKS[kategori] ?? 50_000_000;
@@ -299,6 +317,7 @@ export class PinjamanService {
         tenorBulan: dto.tenorBulan,
         bungaPersenTahun: decimal(activeBungaPersenTahun),
         status: initialStatus,
+        catatan: dto.catatan ?? null,
       },
       include: pinjamanInclude,
     });
@@ -318,7 +337,8 @@ export class PinjamanService {
       where: { id },
       data: {
         status: next,
-        ...(dto.catatan ? { catatan: dto.catatan } : {}),
+        ...(dto.catatan !== undefined ? { catatan: dto.catatan } : {}),
+        ...(dto.alasanPenolakan !== undefined ? { alasanPenolakan: dto.alasanPenolakan } : {}),
       },
       include: pinjamanInclude,
     });
@@ -326,7 +346,12 @@ export class PinjamanService {
 
   async cairkan(user: JwtUser, id: string, dto?: CairkanPinjamanDto) {
     const pinjaman = await this.findOne(user, id);
-    if (pinjaman.status !== StatusPinjaman.MENUNGGU_DOKUMEN) {
+    const validCairStatuses: StatusPinjaman[] = [
+      StatusPinjaman.MENUNGGU_DOKUMEN,
+      StatusPinjaman.SETUJU_KEPRIM,
+      StatusPinjaman.REKOMENDASI_PIMPINAN,
+    ];
+    if (!validCairStatuses.includes(pinjaman.status)) {
       throw new BadRequestException('Pinjaman belum siap untuk dicairkan');
     }
     if (pinjaman.angsuran.length > 0) {

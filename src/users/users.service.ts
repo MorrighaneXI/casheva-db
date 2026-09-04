@@ -21,10 +21,19 @@ export class UsersService {
       throw new ConflictException('Username / NRP sudah digunakan');
     }
 
-    let kotamaId = dto.kotamaId;
-    if (!kotamaId && dto.satminkalId) {
+    let satminkalId: string | undefined = dto.satminkalId;
+    if (!satminkalId) {
+      const firstSatminkal = await this.prisma.satminkal.findFirst();
+      satminkalId = firstSatminkal?.id;
+    }
+    if (!satminkalId) {
+      throw new NotFoundException('Satminkal tidak ditemukan');
+    }
+
+    let kotamaId: string | undefined = dto.kotamaId;
+    if (!kotamaId) {
       const satminkal = await this.prisma.satminkal.findUnique({
-        where: { id: dto.satminkalId },
+        where: { id: satminkalId },
       });
       if (satminkal) {
         kotamaId = satminkal.kotamaId;
@@ -49,7 +58,7 @@ export class UsersService {
         namaLengkap: dto.namaLengkap,
         role: dto.role,
         kotama: { connect: { id: kotamaId } },
-        satminkal: { connect: { id: dto.satminkalId } },
+        satminkal: { connect: { id: satminkalId } },
       },
       select: {
         id: true,

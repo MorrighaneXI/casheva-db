@@ -1,12 +1,12 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsDateString, IsNotEmpty } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsDateString, IsOptional } from 'class-validator';
 
 export class SimpananMassalDto {
-  @ApiProperty({
-    example: '2024-01-05',
+  @ApiPropertyOptional({
+    example: '2026-08-05',
     description: 'Tanggal periode (harus tanggal 5 bulan terkait)',
   })
+  @IsOptional()
   @IsDateString()
-  @IsNotEmpty()
-  periode!: string;
+  periode?: string;
 }

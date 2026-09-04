@@ -6,10 +6,23 @@ import * as streamifier from 'streamifier';
 export class CloudinaryService {
   async uploadFile(
     file: { buffer: Buffer; originalname?: string; mimetype?: string },
-    folder: string = 'casheva/dokumen',
+    folder: string = 'dokumen',
   ): Promise<UploadApiResponse | UploadApiErrorResponse> {
     if (!file || !file.buffer) {
       throw new BadRequestException('File buffer tidak ditemukan');
+    }
+
+    // Safeguard jika config belum terpasang
+    if (!cloudinary.config().api_key && process.env.CLOUDINARY_URL) {
+      try {
+        const uri = new URL(process.env.CLOUDINARY_URL);
+        cloudinary.config({
+          cloud_name: uri.hostname,
+          api_key: uri.username,
+          api_secret: uri.password,
+          secure: true,
+        });
+      } catch {}
     }
 
     return new Promise((resolve, reject) => {

@@ -19,10 +19,10 @@ export class CreatePinjamanDto {
   @IsUUID()
   anggotaId!: string;
 
-  @ApiProperty({ example: 5_000_000, minimum: 1_000_000, maximum: 20_000_000 })
+  @ApiProperty({ example: 10_000_000, minimum: 1_000_000, maximum: 100_000_000 })
   @IsNumber()
   @Min(1_000_000)
-  @Max(20_000_000)
+  @Max(100_000_000)
   nominal!: number;
 
   @ApiProperty({ example: 12, minimum: 1, maximum: 36 })
@@ -30,6 +30,11 @@ export class CreatePinjamanDto {
   @Min(1)
   @Max(36)
   tenorBulan!: number;
+
+  @ApiPropertyOptional({ example: 'Keperluan renovasi rumah dinas' })
+  @IsOptional()
+  @IsString()
+  catatan?: string;
 }
 
 export class UpdateStatusPinjamanDto {
@@ -41,6 +46,11 @@ export class UpdateStatusPinjamanDto {
   @IsOptional()
   @IsString()
   catatan?: string;
+
+  @ApiPropertyOptional({ example: 'Sisa gaji tidak mencukupi atau berkas tidak memenuhi syarat' })
+  @IsOptional()
+  @IsString()
+  alasanPenolakan?: string;
 }
 
 export class CairkanPinjamanDto {
