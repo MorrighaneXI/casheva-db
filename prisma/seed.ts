@@ -140,7 +140,7 @@ async function main() {
     throw new Error('Default Kotama / Satminkal tidak ditemukan setelah seed master');
   }
 
-  // 5. USERS DEMO (Admin, Pimpinan, Keprim, Bendahara, Pengawas, Juru Bayar)
+  // 5. USERS DEMO (Admin, Pimpinan, Keprim, Bendahara, Pengawas, Juru Bayar, Kasir Toko, Petugas Gadai)
   const passwordHash = await bcrypt.hash('Admin123!', 10);
   const rolesToCreate = [
     { username: 'admin', role: Role.ADMIN_KOPERASI, nama: 'Administrator Koperasi' },
@@ -149,6 +149,8 @@ async function main() {
     { username: 'bendahara', role: Role.BENDAHARA, nama: 'Lettu Cku Budi (Bendahara)' },
     { username: 'pengawas', role: Role.PENGAWAS, nama: 'Mayor Inf Tri (Pengawas)' },
     { username: 'jurubayar', role: Role.JURU_BAYAR, nama: 'Serma Agus (Juru Bayar)' },
+    { username: 'kasir', role: Role.KASIR_TOKO, nama: 'Kopda Hendra Setiawan (Kasir Toko)' },
+    { username: 'gadai', role: Role.PETUGAS_GADAI, nama: 'Sertu Bambang (Petugas Gadai)' },
   ];
 
   for (const u of rolesToCreate) {
@@ -171,7 +173,7 @@ async function main() {
       },
     });
   }
-  console.log('👤 Users demo (password: Admin123!): admin, pimpinan, keprim, bendahara, pengawas, jurubayar');
+  console.log('👤 Users demo (password: Admin123!): admin, pimpinan, keprim, bendahara, pengawas, jurubayar, kasir, gadai');
 
   // 6. KOPSTUK & TAJUK TANDA TANGAN
   await prisma.kopstuk.upsert({
@@ -499,6 +501,202 @@ async function main() {
       });
     }
   }
+
+  // 12. SEED KATEGORI & PRODUK TOKO KOPERASI
+  console.log('🌱 Seed Data Kategori & Produk Toko Koperasi...');
+  let katSembako = await prisma.kategoriProduk.findFirst({
+    where: { nama: 'Sembako & Pangan', satminkalId: satminkalDefault.id },
+  });
+  if (!katSembako) {
+    katSembako = await prisma.kategoriProduk.create({
+      data: {
+        nama: 'Sembako & Pangan',
+        deskripsi: 'Beras, minyak goreng, gula, tepung, telur, dan kebutuhan pokok harian',
+        satminkalId: satminkalDefault.id,
+      },
+    });
+  }
+
+  let katKaporlap = await prisma.kategoriProduk.findFirst({
+    where: { nama: 'Kaporlap & Atribut TNI', satminkalId: satminkalDefault.id },
+  });
+  if (!katKaporlap) {
+    katKaporlap = await prisma.kategoriProduk.create({
+      data: {
+        nama: 'Kaporlap & Atribut TNI',
+        deskripsi: 'Seragam PDL, sepatu lars, baret, kopel rim, kaus loreng, dan atribut dinas',
+        satminkalId: satminkalDefault.id,
+      },
+    });
+  }
+
+  let katElektronik = await prisma.kategoriProduk.findFirst({
+    where: { nama: 'Elektronik & Gadget', satminkalId: satminkalDefault.id },
+  });
+  if (!katElektronik) {
+    katElektronik = await prisma.kategoriProduk.create({
+      data: {
+        nama: 'Elektronik & Gadget',
+        deskripsi: 'Smartphone, powerbank, headset, kipas angin, dan peralatan elektronik',
+        satminkalId: satminkalDefault.id,
+      },
+    });
+  }
+
+  let katSnack = await prisma.kategoriProduk.findFirst({
+    where: { nama: 'Makanan Ringan & Minuman', satminkalId: satminkalDefault.id },
+  });
+  if (!katSnack) {
+    katSnack = await prisma.kategoriProduk.create({
+      data: {
+        nama: 'Makanan Ringan & Minuman',
+        deskripsi: 'Kopi, teh, susu, biskuit, mie instan, dan minuman segar',
+        satminkalId: satminkalDefault.id,
+      },
+    });
+  }
+
+  const sampleProducts = [
+    {
+      kodeBarcode: '8992772000014',
+      namaProduk: 'Beras Rojolele Super 5kg',
+      kategoriId: katSembako.id,
+      satuanBesar: 'Karung',
+      satuanKecil: 'Sak',
+      pcsPerUnit: 1,
+      hargaBeli: decimal(65000),
+      hargaJual: decimal(72000),
+      stokFisik: 45,
+      stokMinimum: 10,
+      isPromoAktif: true,
+      diskonPersen: decimal(5),
+      isFastConsume: true,
+      gambarUrl: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=400&auto=format&fit=crop&q=80',
+    },
+    {
+      kodeBarcode: '8998866100021',
+      namaProduk: 'Minyak Goreng Bimoli 2L',
+      kategoriId: katSembako.id,
+      satuanBesar: 'Dus',
+      satuanKecil: 'Pouch',
+      pcsPerUnit: 6,
+      hargaBeli: decimal(34000),
+      hargaJual: decimal(38000),
+      stokFisik: 36,
+      stokMinimum: 12,
+      isPromoAktif: false,
+      diskonPersen: decimal(0),
+      isFastConsume: true,
+      gambarUrl: 'https://images.unsplash.com/photo-1474979266404-7eaacbcd87c5?w=400&auto=format&fit=crop&q=80',
+    },
+    {
+      kodeBarcode: '8999999000038',
+      namaProduk: 'Indomie Goreng Special',
+      kategoriId: katSnack.id,
+      satuanBesar: 'Dus',
+      satuanKecil: 'Pcs',
+      pcsPerUnit: 40,
+      hargaBeli: decimal(2700),
+      hargaJual: decimal(3100),
+      stokFisik: 240,
+      stokMinimum: 40,
+      isPromoAktif: false,
+      diskonPersen: decimal(0),
+      isFastConsume: true,
+      gambarUrl: 'https://images.unsplash.com/photo-1612927601601-6638404737ce?w=400&auto=format&fit=crop&q=80',
+    },
+    {
+      kodeBarcode: '8993005000045',
+      namaProduk: 'Sepatu PDL Loreng Jatah Standar',
+      kategoriId: katKaporlap.id,
+      satuanBesar: 'Karton',
+      satuanKecil: 'Pasang',
+      pcsPerUnit: 10,
+      hargaBeli: decimal(320000),
+      hargaJual: decimal(385000),
+      stokFisik: 18,
+      stokMinimum: 5,
+      isPromoAktif: true,
+      diskonPersen: decimal(8),
+      isFastConsume: false,
+      gambarUrl: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&auto=format&fit=crop&q=80',
+    },
+    {
+      kodeBarcode: '8993005000052',
+      namaProduk: 'Kaus Kaki Hitam Tebal TNI',
+      kategoriId: katKaporlap.id,
+      satuanBesar: 'Lusin',
+      satuanKecil: 'Pasang',
+      pcsPerUnit: 12,
+      hargaBeli: decimal(12000),
+      hargaJual: decimal(18000),
+      stokFisik: 60,
+      stokMinimum: 15,
+      isPromoAktif: false,
+      diskonPersen: decimal(0),
+      isFastConsume: false,
+      gambarUrl: 'https://images.unsplash.com/photo-1582966770680-a60c37c64b4b?w=400&auto=format&fit=crop&q=80',
+    },
+    {
+      kodeBarcode: '8991001000069',
+      namaProduk: 'Gula Pasir Gulaku 1kg',
+      kategoriId: katSembako.id,
+      satuanBesar: 'Karung',
+      satuanKecil: 'Bungkus',
+      pcsPerUnit: 24,
+      hargaBeli: decimal(15000),
+      hargaJual: decimal(17500),
+      stokFisik: 72,
+      stokMinimum: 24,
+      isPromoAktif: false,
+      diskonPersen: decimal(0),
+      isFastConsume: true,
+      gambarUrl: 'https://images.unsplash.com/photo-1581441363689-1f3c3c414635?w=400&auto=format&fit=crop&q=80',
+    },
+  ];
+
+  for (const prod of sampleProducts) {
+    await prisma.produk.upsert({
+      where: { kodeBarcode: prod.kodeBarcode },
+      create: { ...prod, satminkalId: satminkalDefault.id },
+      update: { ...prod, satminkalId: satminkalDefault.id },
+    });
+  }
+  console.log(`✅ ${sampleProducts.length} Produk toko koperasi berhasil di-seed.`);
+
+  // 13. SEED SUPPLIER
+  const existingSupplier = await prisma.supplier.findFirst({
+    where: { kodeSupplier: 'SUP-001', satminkalId: satminkalDefault.id },
+  });
+  if (!existingSupplier) {
+    await prisma.supplier.create({
+      data: {
+        kodeSupplier: 'SUP-001',
+        namaSupplier: 'PT Indomarco Adi Prima (Grosir Sembako)',
+        kontakPerson: 'Bapak Hartono',
+        telepon: '0812-3456-7890',
+        alamat: 'Kawasan Industri Candi Blok A-12, Semarang',
+        totalHutang: decimal(0),
+        satminkalId: satminkalDefault.id,
+      },
+    });
+  }
+
+  // 14. SEED EVENT UNDIAN RAT
+  const eventUndianCount = await prisma.eventUndian.count();
+  if (eventUndianCount === 0) {
+    await prisma.eventUndian.create({
+      data: {
+        namaEvent: 'Undian Doorprize RAT Koperasi Tahun Buku 2026',
+        hadiahUtama: 'Sepeda Motor Honda Beat CBS & Logam Mulia 5 Gram',
+        poinPerKupon: 50,
+        tanggalUndi: new Date('2026-12-20'),
+        isSelesai: false,
+        satminkalId: satminkalDefault.id,
+      },
+    });
+  }
+  console.log('✅ Master Supplier & Event Undian RAT berhasil di-seed.');
 
   console.log('✅ SEED SELESAI DENGAN SUKSES! Seluruh data dummy telah siap.');
   await prisma.$disconnect();
