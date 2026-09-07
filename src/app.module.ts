@@ -16,6 +16,14 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { DokumenModule } from './dokumen/dokumen.module';
 import { ReportsModule } from './reports/reports.module';
 import { BackupModule } from './backup/backup.module';
+import { TokoModule } from './toko/toko.module';
+import { PosModule } from './pos/pos.module';
+import { SupplierModule } from './supplier/supplier.module';
+import { PesananModule } from './pesanan/pesanan.module';
+import { MarketplaceModule } from './marketplace/marketplace.module';
+import { GadaiModule } from './gadai/gadai.module';
+import { LoyaltyModule } from './loyalty/loyalty.module';
+import { LaporanTokoModule } from './laporan-toko/laporan-toko.module';
 
 @Module({
   imports: [
@@ -34,8 +42,17 @@ import { BackupModule } from './backup/backup.module';
     DokumenModule,
     ReportsModule,
     BackupModule,
+    TokoModule,
+    PosModule,
+    SupplierModule,
+    PesananModule,
+    MarketplaceModule,
+    GadaiModule,
+    LoyaltyModule,
+    LaporanTokoModule,
   ],
   controllers: [AppController],
   providers: [AppService],
 })
 export class AppModule {}
+

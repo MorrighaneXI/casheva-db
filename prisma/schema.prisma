@@ -38,8 +38,19 @@ model Satminkal {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  pendapatan Pendapatan[]
-  pengaturanKoperasi PengaturanKoperasi?
+  pendapatan           Pendapatan[]
+  pengaturanKoperasi   PengaturanKoperasi?
+  kategoriProduk       KategoriProduk[]
+  produk               Produk[]
+  supplier             Supplier[]
+  pembelianSupplier    PembelianSupplier[]
+  returSupplier        ReturSupplier[]
+  transaksiPos         TransaksiPos[]
+  pesananOnline        PesananOnline[]
+  pengajuanMarketplace PengajuanMarketplace[]
+  gadaiBarang          GadaiBarang[]
+  eventUndian          EventUndian[]
+  targetBelanjaBulanan TargetBelanjaBulanan[]
 
   @@index([kotamaId])
   @@map("tb_satker")
@@ -85,23 +96,26 @@ enum Role {
   PENGAWAS
   ANGGOTA
   JURU_BAYAR
+  KASIR_TOKO
+  PETUGAS_GADAI
 }
 
 model User {
-  id                  String    @id @default(uuid())
-  username            String    @unique
+  id                  String         @id @default(uuid())
+  username            String         @unique
   password            String
   namaLengkap         String
-  role                Role      @default(ADMIN_KOPERASI)
+  role                Role           @default(ADMIN_KOPERASI)
   kotamaId            String
-  kotama              Kotama    @relation(fields: [kotamaId], references: [id])
+  kotama              Kotama         @relation(fields: [kotamaId], references: [id])
   satminkalId         String
-  satminkal           Satminkal @relation(fields: [satminkalId], references: [id])
-  isActive            Boolean   @default(true)
+  satminkal           Satminkal      @relation(fields: [satminkalId], references: [id])
+  isActive            Boolean        @default(true)
   currentSessionToken String?
   lastActiveAt        DateTime?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  transaksiPos        TransaksiPos[] @relation("KasirTransaksi")
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
   @@index([kotamaId])
   @@index([satminkalId])
@@ -112,23 +126,36 @@ model User {
 // 3. ENTITAS ANGGOTA KOPERASI
 // ==========================================
 
+enum TipeAnggota {
+  ORGANIK
+  NON_ORGANIK
+}
+
 model Anggota {
-  id          String       @id @default(uuid())
-  nama        String
-  nrpNip      String       @unique
-  pangkatId   String
-  pangkat     Pangkat      @relation(fields: [pangkatId], references: [id])
-  korpsId     String
-  korps       Korps        @relation(fields: [korpsId], references: [id])
-  satminkalId String
-  satminkal   Satminkal    @relation(fields: [satminkalId], references: [id])
-  isAktif     Boolean      @default(true)
-  tmtAnggota  DateTime     @default(now())
-  simpanan    Simpanan[]
-  pinjaman    Pinjaman[]
-  shuAnggota  ShuAnggota[]
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id            String                 @id @default(uuid())
+  nama          String
+  nrpNip        String                 @unique
+  pangkatId     String
+  pangkat       Pangkat                @relation(fields: [pangkatId], references: [id])
+  korpsId       String
+  korps         Korps                  @relation(fields: [korpsId], references: [id])
+  satminkalId   String
+  satminkal     Satminkal              @relation(fields: [satminkalId], references: [id])
+  tipeAnggota   TipeAnggota            @default(ORGANIK)
+  creditLimit   Decimal                @default(5000000) @db.Decimal(18, 2)
+  isAktif       Boolean                @default(true)
+  tmtAnggota    DateTime               @default(now())
+  simpanan      Simpanan[]
+  pinjaman      Pinjaman[]
+  shuAnggota    ShuAnggota[]
+  transaksiPos  TransaksiPos[]
+  pesananOnline PesananOnline[]
+  marketplace   PengajuanMarketplace[]
+  gadaiBarang   GadaiBarang[]
+  poinAnggota   PoinAnggota?
+  kuponUndian   KuponUndian[]
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
 
   @@index([satminkalId])
 }
@@ -169,6 +196,12 @@ model Simpanan {
 // 5. PINJAMAN & ANGSURAN
 // ==========================================
 
+enum TipePinjaman {
+  UANG_USIPA
+  BARANG_TOKO
+  DANA_GADAI
+}
+
 enum StatusPinjaman {
   DIAJUKAN
   VERIFIKASI_PRIMKOP
@@ -185,6 +218,7 @@ model Pinjaman {
   id               String            @id @default(uuid())
   anggotaId        String
   anggota          Anggota           @relation(fields: [anggotaId], references: [id])
+  tipePinjaman     TipePinjaman      @default(UANG_USIPA)
   nominal          Decimal           @db.Decimal(18, 2)
   tenorBulan       Int
   bungaPersenTahun Decimal           @default(12) @db.Decimal(5, 2)
@@ -238,6 +272,8 @@ enum JenisPendapatan {
   BUNGA_PINJAMAN
   ADMINISTRASI_RISIKO
   JASA_LAINNYA
+  LABA_TOKO_POS
+  JASA_TITIP_GADAI
 }
 
 model Pendapatan {
@@ -367,3 +403,434 @@ model RiwayatBunga {
   @@index([satminkalId])
   @@map("tb_riwayat_bunga")
 }
+
+// ==========================================
+// 10. MODUL INVENTORI, TOKO & MULTI-SATUAN
+// ==========================================
+
+model KategoriProduk {
+  id          String    @id @default(uuid())
+  satminkalId String
+  satminkal   Satminkal @relation(fields: [satminkalId], references: [id])
+  nama        String
+  deskripsi   String?
+  produk      Produk[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("tb_kategori_produk")
+}
+
+enum JenisSumberProduk {
+  INVENTORI_KOPERASI
+  MARKETPLACE_ANGGOTA
+}
+
+model Produk {
+  id               String              @id @default(uuid())
+  satminkalId      String
+  satminkal        Satminkal           @relation(fields: [satminkalId], references: [id])
+  kategoriId       String?
+  kategori         KategoriProduk?     @relation(fields: [kategoriId], references: [id])
+  kodeBarcode      String              @unique
+  namaProduk       String
+  satuanKecil      String              @default("Pcs")
+  satuanBesar      String?
+  pcsPerUnit       Int                 @default(1)
+  hargaBeli        Decimal             @db.Decimal(18, 2)
+  hargaJual        Decimal             @db.Decimal(18, 2)
+  stokFisik        Int                 @default(0)
+  stokMinimum      Int                 @default(5)
+  diskonPersen     Decimal             @default(0) @db.Decimal(5, 2)
+  isPromoAktif     Boolean             @default(false)
+  isFastConsume    Boolean             @default(false)
+  sumberProduk     JenisSumberProduk   @default(INVENTORI_KOPERASI)
+  penjualAnggotaId String?
+  gambarUrl        String?
+  isAktif          Boolean             @default(true)
+  mutasiStok       MutasiStok[]
+  itemTransaksi    ItemTransaksiPos[]
+  itemPembelian    ItemPembelian[]
+  itemRetur        ItemReturSupplier[]
+  itemPesanan      ItemPesananOnline[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  @@index([satminkalId])
+  @@index([kodeBarcode])
+  @@map("tb_produk")
+}
+
+// ==========================================
+// 11. PENGADAAN & SUPPLIER
+// ==========================================
+
+model Supplier {
+  id            String              @id @default(uuid())
+  satminkalId   String
+  satminkal     Satminkal           @relation(fields: [satminkalId], references: [id])
+  kodeSupplier  String              @unique
+  namaSupplier  String
+  kontakPerson  String?
+  telepon       String?
+  alamat        String?
+  totalHutang   Decimal             @default(0) @db.Decimal(18, 2)
+  pembelian     PembelianSupplier[]
+  returSupplier ReturSupplier[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@map("tb_supplier")
+}
+
+model PembelianSupplier {
+  id             String                @id @default(uuid())
+  satminkalId    String
+  satminkal      Satminkal             @relation(fields: [satminkalId], references: [id])
+  supplierId     String
+  supplier       Supplier              @relation(fields: [supplierId], references: [id])
+  nomorNota      String                @unique
+  tanggalNota    DateTime              @default(now())
+  metodeBayar    String                @default("TUNAI")
+  jatuhTempo     DateTime?
+  totalPembelian Decimal               @db.Decimal(18, 2)
+  sisaHutang     Decimal               @default(0) @db.Decimal(18, 2)
+  statusLunas    Boolean               @default(true)
+  items          ItemPembelian[]
+  retur          ReturSupplier[]
+  pembayaran     BayarHutangSupplier[]
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  @@map("tb_pembelian_supplier")
+}
+
+model ItemPembelian {
+  id                String            @id @default(uuid())
+  pembelianId       String
+  pembelian         PembelianSupplier @relation(fields: [pembelianId], references: [id], onDelete: Cascade)
+  produkId          String
+  produk            Produk            @relation(fields: [produkId], references: [id])
+  jumlahSatuanBesar Int               @default(0)
+  satuanBesar       String?
+  isiPerSatuan      Int               @default(1)
+  totalJumlahPcs    Int
+  hargaBeliSatuan   Decimal           @db.Decimal(18, 2)
+  subtotal          Decimal           @db.Decimal(18, 2)
+
+  @@map("tb_item_pembelian")
+}
+
+model ReturSupplier {
+  id              String              @id @default(uuid())
+  satminkalId     String
+  satminkal       Satminkal           @relation(fields: [satminkalId], references: [id])
+  pembelianId     String
+  pembelian       PembelianSupplier   @relation(fields: [pembelianId], references: [id])
+  supplierId      String
+  supplier        Supplier            @relation(fields: [supplierId], references: [id])
+  nomorRetur      String              @unique
+  tanggalRetur    DateTime            @default(now())
+  totalNilaiRetur Decimal             @db.Decimal(18, 2)
+  alasanRetur     String?
+  items           ItemReturSupplier[]
+  createdAt       DateTime            @default(now())
+
+  @@map("tb_retur_supplier")
+}
+
+model ItemReturSupplier {
+  id          String        @id @default(uuid())
+  returId     String
+  retur       ReturSupplier @relation(fields: [returId], references: [id], onDelete: Cascade)
+  produkId    String
+  produk      Produk        @relation(fields: [produkId], references: [id])
+  jumlahPcs   Int
+  hargaSatuan Decimal       @db.Decimal(18, 2)
+  subtotal    Decimal       @db.Decimal(18, 2)
+
+  @@map("tb_item_retur_supplier")
+}
+
+model BayarHutangSupplier {
+  id           String            @id @default(uuid())
+  pembelianId  String
+  pembelian    PembelianSupplier @relation(fields: [pembelianId], references: [id])
+  tanggalBayar DateTime          @default(now())
+  nominalBayar Decimal           @db.Decimal(18, 2)
+  noKwitansi   String?
+  keterangan   String?
+  createdAt    DateTime          @default(now())
+
+  @@map("tb_bayar_hutang_supplier")
+}
+
+// ==========================================
+// 12. POS KASIR & MUTASI STOK
+// ==========================================
+
+enum MetodeBayarPos {
+  TUNAI
+  QRIS
+  TRANSFER
+  KREDIT_TEMPO
+}
+
+model TransaksiPos {
+  id            String             @id @default(uuid())
+  satminkalId   String
+  satminkal     Satminkal          @relation(fields: [satminkalId], references: [id])
+  nomorInvoice  String             @unique
+  kasirId       String
+  kasir         User               @relation("KasirTransaksi", fields: [kasirId], references: [id])
+  anggotaId     String?
+  anggota       Anggota?           @relation(fields: [anggotaId], references: [id])
+  namaPelanggan String?
+  metodeBayar   MetodeBayarPos     @default(TUNAI)
+  totalItem     Int
+  totalBelanja  Decimal            @db.Decimal(18, 2)
+  totalHpp      Decimal            @db.Decimal(18, 2)
+  totalDiskon   Decimal            @default(0) @db.Decimal(18, 2)
+  bayarTunai    Decimal            @default(0) @db.Decimal(18, 2)
+  kembalian     Decimal            @default(0) @db.Decimal(18, 2)
+  poinDidapat   Int                @default(0)
+  status        String             @default("SELESAI")
+  pinjamanId    String?
+  items         ItemTransaksiPos[]
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@map("tb_transaksi_pos")
+}
+
+model ItemTransaksiPos {
+  id           String       @id @default(uuid())
+  transaksiId  String
+  transaksi    TransaksiPos @relation(fields: [transaksiId], references: [id], onDelete: Cascade)
+  produkId     String
+  produk       Produk       @relation(fields: [produkId], references: [id])
+  jumlah       Int
+  hargaBeliHpp Decimal      @db.Decimal(18, 2)
+  hargaJual    Decimal      @db.Decimal(18, 2)
+  diskonItem   Decimal      @default(0) @db.Decimal(18, 2)
+  subtotal     Decimal      @db.Decimal(18, 2)
+
+  @@map("tb_item_transaksi_pos")
+}
+
+model MutasiStok {
+  id            String   @id @default(uuid())
+  produkId      String
+  produk        Produk   @relation(fields: [produkId], references: [id])
+  jenis         String
+  jumlahPcs     Int
+  stokSebelum   Int
+  stokSesudah   Int
+  referensiNota String?
+  keterangan    String?
+  createdAt     DateTime @default(now())
+
+  @@map("tb_mutasi_stok")
+}
+
+// ==========================================
+// 13. PESANAN ONLINE, TITIP PIKET & DELIVERY CEPAT DENGAN SLA
+// ==========================================
+
+enum TipePengambilan {
+  AMBIL_SENDIRI
+  TITIP_PIKET_SATUAN
+  DELIVERY_CEPAT
+}
+
+enum StatusPesananOnline {
+  MENUNGGU_KONFIRMASI
+  DIPROSES_PETUGAS
+  SEDANG_DIANTAR
+  TITIP_DI_PIKET
+  SELESAI
+  DIBATALKAN
+}
+
+model PesananOnline {
+  id               String              @id @default(uuid())
+  satminkalId      String
+  satminkal        Satminkal           @relation(fields: [satminkalId], references: [id])
+  nomorPesanan     String              @unique
+  anggotaId        String
+  anggota          Anggota             @relation(fields: [anggotaId], references: [id])
+  tipePengambilan  TipePengambilan     @default(AMBIL_SENDIRI)
+  lokasiTujuan     String?
+  namaPetugasPiket String?
+  noHpPenerima     String?
+  ongkir           Decimal             @default(0) @db.Decimal(18, 2)
+  totalHargaBarang Decimal             @db.Decimal(18, 2)
+  totalTagihan     Decimal             @db.Decimal(18, 2)
+  metodeBayar      MetodeBayarPos      @default(TUNAI)
+  status           StatusPesananOnline @default(MENUNGGU_KONFIRMASI)
+  estimasiMenit    Int                 @default(30)
+  waktuPesan       DateTime            @default(now())
+  waktuMulaiAntar  DateTime?
+  waktuSelesai     DateTime?
+  isTerlambatSla   Boolean             @default(false)
+  kompensasiDiskon Decimal             @default(0) @db.Decimal(18, 2)
+  items            ItemPesananOnline[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  @@map("tb_pesanan_online")
+}
+
+model ItemPesananOnline {
+  id          String        @id @default(uuid())
+  pesananId   String
+  pesanan     PesananOnline @relation(fields: [pesananId], references: [id], onDelete: Cascade)
+  produkId    String
+  produk      Produk        @relation(fields: [produkId], references: [id])
+  jumlah      Int
+  hargaSatuan Decimal       @db.Decimal(18, 2)
+  subtotal    Decimal       @db.Decimal(18, 2)
+
+  @@map("tb_item_pesanan_online")
+}
+
+// ==========================================
+// 14. MARKETPLACE UMKM ANGGOTA (PENGAJUAN & VALIDASI)
+// ==========================================
+
+enum StatusPengajuanMarketplace {
+  DIAJUKAN
+  DISETUJUI
+  DITOLAK
+  NONAKTIF
+}
+
+model PengajuanMarketplace {
+  id             String                     @id @default(uuid())
+  satminkalId    String
+  satminkal      Satminkal                  @relation(fields: [satminkalId], references: [id])
+  anggotaId      String
+  anggota        Anggota                    @relation(fields: [anggotaId], references: [id])
+  namaProduk     String
+  kategori       String
+  deskripsi      String?
+  hargaJualUsul  Decimal                    @db.Decimal(18, 2)
+  komisiKoperasi Decimal                    @default(5) @db.Decimal(5, 2)
+  stokAwal       Int                        @default(1)
+  gambarUrl      String?
+  status         StatusPengajuanMarketplace @default(DIAJUKAN)
+  catatanReview  String?
+  reviewedBy     String?
+  reviewedAt     DateTime?
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
+
+  @@map("tb_pengajuan_marketplace")
+}
+
+// ==========================================
+// 15. UNIT USAHA GADAI & LELANG BARANG SITA
+// ==========================================
+
+enum KategoriBarangGadai {
+  EMAS_PERHIASAN
+  ELEKTRONIK_GADGET
+  KENDARAAN_BERMOTOR
+  LAINNYA
+}
+
+enum StatusGadai {
+  PENGAJUAN_TAKSIRAN
+  AKTIF_BERJALAN
+  DITEBUS_LUNAS
+  JATUH_TEMPO_LELANG
+  BARANG_TERJUAL_LELANG
+}
+
+model GadaiBarang {
+  id                 String              @id @default(uuid())
+  satminkalId        String
+  satminkal          Satminkal           @relation(fields: [satminkalId], references: [id])
+  nomorSbg           String              @unique
+  anggotaId          String
+  anggota            Anggota             @relation(fields: [anggotaId], references: [id])
+  kategori           KategoriBarangGadai
+  namaBarang         String
+  spesifikasiKondisi String?
+  nilaiTaksiran      Decimal             @db.Decimal(18, 2)
+  uangPinjamanGadai  Decimal             @db.Decimal(18, 2)
+  biayaJasaTitip     Decimal             @default(1.5) @db.Decimal(5, 2)
+  biayaAdmin         Decimal             @default(25000) @db.Decimal(18, 2)
+  tanggalGadai       DateTime            @default(now())
+  jatuhTempo         DateTime
+  status             StatusGadai         @default(AKTIF_BERJALAN)
+  tanggalPenebusan   DateTime?
+  totalDitebus       Decimal?            @db.Decimal(18, 2)
+  fotoBarangUrl      String?
+  hargaLelangBuka    Decimal?            @db.Decimal(18, 2)
+  hargaLelangTerjual Decimal?           @db.Decimal(18, 2)
+  tanggalTerjual     DateTime?
+  pembeliLelang      String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@map("tb_gadai_barang")
+}
+
+// ==========================================
+// 16. LOYALTY POINT, UNDIAN RAT & TARGET BUYING
+// ==========================================
+
+model PoinAnggota {
+  id             String   @id @default(uuid())
+  anggotaId      String   @unique
+  anggota        Anggota  @relation(fields: [anggotaId], references: [id])
+  totalPoinAktif Int      @default(0)
+  totalPoinKlaim Int      @default(0)
+  updatedAt      DateTime @updatedAt
+
+  @@map("tb_poin_anggota")
+}
+
+model EventUndian {
+  id           String        @id @default(uuid())
+  satminkalId  String
+  satminkal    Satminkal     @relation(fields: [satminkalId], references: [id])
+  namaEvent    String
+  poinPerKupon Int           @default(50)
+  hadiahUtama  String
+  tanggalUndi  DateTime
+  isSelesai    Boolean       @default(false)
+  kupon        KuponUndian[]
+  createdAt    DateTime      @default(now())
+
+  @@map("tb_event_undian")
+}
+
+model KuponUndian {
+  id         String      @id @default(uuid())
+  eventId    String
+  event      EventUndian @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  anggotaId  String
+  anggota    Anggota     @relation(fields: [anggotaId], references: [id])
+  nomorKupon String      @unique
+  isPemenang Boolean     @default(false)
+  namaHadiah String?
+  createdAt  DateTime    @default(now())
+
+  @@map("tb_kupon_undian")
+}
+
+model TargetBelanjaBulanan {
+  id            String    @id @default(uuid())
+  satminkalId   String
+  satminkal     Satminkal @relation(fields: [satminkalId], references: [id])
+  bulanTahun    String
+  targetNominal Decimal   @default(500000) @db.Decimal(18, 2)
+  bonusPoin     Int       @default(100)
+  createdAt     DateTime  @default(now())
+
+  @@unique([satminkalId, bulanTahun])
+  @@map("tb_target_belanja_bulanan")
+}
+
