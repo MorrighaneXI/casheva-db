@@ -2,11 +2,13 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsBoolean,
   IsDateString,
+  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
 } from 'class-validator';
+import { Role } from '@prisma/client';
 
 export class CreateAnggotaDto {
   @ApiProperty({ example: 'Letkol Inf Sigit Widiyanto' })
@@ -31,6 +33,16 @@ export class CreateAnggotaDto {
   @IsOptional()
   @IsDateString()
   tmtAnggota?: string;
+
+  @ApiPropertyOptional({ enum: Role, default: Role.ANGGOTA })
+  @IsOptional()
+  @IsEnum(Role)
+  role?: Role;
+
+  @ApiPropertyOptional({ example: 'Admin123!' })
+  @IsOptional()
+  @IsString()
+  password?: string;
 }
 
 export class UpdateAnggotaDto {
@@ -58,6 +70,16 @@ export class UpdateAnggotaDto {
   @IsOptional()
   @IsBoolean()
   isAktif?: boolean;
+
+  @ApiPropertyOptional({ enum: Role })
+  @IsOptional()
+  @IsEnum(Role)
+  role?: Role;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  password?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

@@ -6,7 +6,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { Prisma, User } from '@prisma/client';
+import { Prisma, User, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -14,8 +14,9 @@ export class UsersService {
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateUserDto) {
+    const username = dto.username.trim();
     const existing = await this.prisma.user.findUnique({
-      where: { username: dto.username },
+      where: { username },
     });
     if (existing) {
       throw new ConflictException('Username / NRP sudah digunakan');
@@ -53,9 +54,9 @@ export class UsersService {
 
     const user = await this.prisma.user.create({
       data: {
-        username: dto.username,
+        username,
         password: hashedPassword,
-        namaLengkap: dto.namaLengkap,
+        namaLengkap: dto.namaLengkap.trim(),
         role: dto.role,
         kotama: { connect: { id: kotamaId } },
         satminkal: { connect: { id: satminkalId } },
@@ -72,45 +73,56 @@ export class UsersService {
       },
     });
 
-    // If role is ANGGOTA or pangkatId is provided, also ensure Anggota record exists
-    if (dto.role === 'ANGGOTA' || dto.pangkatId || dto.nrpNip) {
-      const nrpNip = dto.nrpNip || dto.username;
-      const existingAnggota = await this.prisma.anggota.findFirst({
-        where: { nrpNip },
-      });
+    // Always ensure synchronized Anggota entity exists
+    const nrpNip = dto.nrpNip || username;
+    const existingAnggota = await this.prisma.anggota.findFirst({
+      where: { nrpNip },
+    });
 
-      if (!existingAnggota) {
-        let pangkatId = dto.pangkatId;
-        if (!pangkatId) {
-          const firstPangkat = await this.prisma.pangkat.findFirst();
-          pangkatId = firstPangkat?.id;
-        }
-
-        let korpsId = dto.korpsId;
-        if (!korpsId) {
-          const firstKorps = await this.prisma.korps.findFirst();
-          korpsId = firstKorps?.id;
-        }
-
-        if (pangkatId && korpsId) {
-          await this.prisma.anggota.create({
-            data: {
-              nama: dto.namaLengkap,
-              nrpNip,
-              pangkatId,
-              korpsId,
-              satminkalId: dto.satminkalId,
-            },
-          });
-        }
+    if (!existingAnggota) {
+      let pangkatId = dto.pangkatId;
+      if (!pangkatId) {
+        const firstPangkat = await this.prisma.pangkat.findFirst();
+        pangkatId = firstPangkat?.id;
       }
+
+      let korpsId = dto.korpsId;
+      if (!korpsId) {
+        const firstKorps = await this.prisma.korps.findFirst();
+        korpsId = firstKorps?.id;
+      }
+
+      if (pangkatId && korpsId) {
+        await this.prisma.anggota.create({
+          data: {
+            nama: dto.namaLengkap.trim(),
+            nrpNip,
+            pangkatId,
+            korpsId,
+            satminkalId,
+            isAktif: true,
+          },
+        });
+      }
+    } else {
+      // Sync Anggota if already exists
+      await this.prisma.anggota.update({
+        where: { id: existingAnggota.id },
+        data: {
+          nama: dto.namaLengkap.trim(),
+          isAktif: true,
+          satminkalId,
+          ...(dto.pangkatId ? { pangkatId: dto.pangkatId } : {}),
+          ...(dto.korpsId && dto.korpsId !== 'NONE' ? { korpsId: dto.korpsId } : {}),
+        },
+      });
     }
 
     return user;
   }
 
   async findAll() {
-    return this.prisma.user.findMany({
+    const users = await this.prisma.user.findMany({
       select: {
         id: true,
         username: true,
@@ -119,9 +131,56 @@ export class UsersService {
         kotama: { select: { id: true, kode: true, nama: true } },
         satminkal: { select: { id: true, kode: true, nama: true } },
         isActive: true,
+        lastActiveAt: true,
+        currentSessionToken: true,
         createdAt: true,
       },
       orderBy: { createdAt: 'desc' },
+    });
+
+    // Fetch corresponding anggota to enrich metadata
+    const nrps = users.map((u) => u.username);
+    const anggotaList = await this.prisma.anggota.findMany({
+      where: { nrpNip: { in: nrps } },
+      include: {
+        pangkat: true,
+        korps: true,
+      },
+    });
+
+    const anggotaMap = new Map(anggotaList.map((a) => [a.nrpNip, a]));
+
+    const now = Date.now();
+    return users.map((u) => {
+      const matchedAnggota = anggotaMap.get(u.username);
+      const diffMs = u.lastActiveAt ? now - new Date(u.lastActiveAt).getTime() : Infinity;
+      const isOnline = u.isActive && diffMs < 1000 * 60 * 5; // 5 mins
+      const isIdle = u.isActive && diffMs >= 1000 * 60 * 5 && diffMs < 1000 * 60 * 30; // 5-30 mins
+
+      let formattedNama = u.namaLengkap;
+      if (matchedAnggota) {
+        const pNama = matchedAnggota.pangkat?.nama ? `${matchedAnggota.pangkat.nama} ` : '';
+        const kNama = (matchedAnggota.korps?.nama && matchedAnggota.korps.nama !== '-') ? `${matchedAnggota.korps.nama} ` : '';
+        formattedNama = `${pNama}${kNama}${matchedAnggota.nama}`.trim();
+      }
+
+      return {
+        ...u,
+        namaLengkap: formattedNama || u.namaLengkap,
+        isAktif: u.isActive,
+        isOnline,
+        isIdle,
+        isOffline: !isOnline && !isIdle,
+        anggota: matchedAnggota
+          ? {
+              id: matchedAnggota.id,
+              pangkat: matchedAnggota.pangkat,
+              korps: matchedAnggota.korps,
+              tmtAnggota: matchedAnggota.tmtAnggota,
+              creditLimit: matchedAnggota.creditLimit,
+            }
+          : null,
+      };
     });
   }
 
@@ -136,6 +195,8 @@ export class UsersService {
         kotamaId: true,
         satminkalId: true,
         isActive: true,
+        lastActiveAt: true,
+        currentSessionToken: true,
         createdAt: true,
       },
     });
@@ -143,13 +204,30 @@ export class UsersService {
     return user;
   }
 
+  async updateRole(id: string, role: Role) {
+    const user = await this.findOne(id);
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: { role },
+      select: {
+        id: true,
+        username: true,
+        namaLengkap: true,
+        role: true,
+        isActive: true,
+        updatedAt: true,
+      },
+    });
+    return updated;
+  }
+
   async update(id: string, dto: UpdateUserDto) {
-    await this.findOne(id);
+    const user = await this.findOne(id);
 
     const updateData: Prisma.UserUpdateInput = {};
 
-    if (dto.username !== undefined) updateData.username = dto.username;
-    if (dto.namaLengkap !== undefined) updateData.namaLengkap = dto.namaLengkap;
+    if (dto.username !== undefined) updateData.username = dto.username.trim();
+    if (dto.namaLengkap !== undefined) updateData.namaLengkap = dto.namaLengkap.trim();
     if (dto.role !== undefined) updateData.role = dto.role;
     if (dto.isActive !== undefined) updateData.isActive = dto.isActive;
 
@@ -165,7 +243,7 @@ export class UsersService {
       updateData.password = await bcrypt.hash(dto.password, 10);
     }
 
-    return this.prisma.user.update({
+    const updatedUser = await this.prisma.user.update({
       where: { id },
       data: updateData,
       select: {
@@ -177,17 +255,86 @@ export class UsersService {
         updatedAt: true,
       },
     });
+
+    // Synchronize Anggota record
+    const nrpToFind = user.username;
+    const existingAnggota = await this.prisma.anggota.findFirst({
+      where: { nrpNip: nrpToFind },
+    });
+
+    if (existingAnggota) {
+      await this.prisma.anggota.update({
+        where: { id: existingAnggota.id },
+        data: {
+          ...(dto.namaLengkap ? { nama: dto.namaLengkap.trim() } : {}),
+          ...(dto.username ? { nrpNip: dto.username.trim() } : {}),
+          ...(dto.isActive !== undefined ? { isAktif: dto.isActive } : {}),
+          ...(dto.satminkalId ? { satminkalId: dto.satminkalId } : {}),
+          ...(dto.pangkatId ? { pangkatId: dto.pangkatId } : {}),
+          ...(dto.korpsId && dto.korpsId !== 'NONE' ? { korpsId: dto.korpsId } : {}),
+        },
+      });
+    }
+
+    return updatedUser;
   }
 
   async remove(id: string): Promise<Pick<User, 'id' | 'isActive'>> {
-    await this.findOne(id);
-    return this.prisma.user.update({
+    const user = await this.findOne(id);
+    const updated = await this.prisma.user.update({
       where: { id },
       data: { isActive: false, currentSessionToken: null },
       select: {
         id: true,
         isActive: true,
       },
+    });
+
+    // Also deactivate anggota
+    await this.prisma.anggota
+      .updateMany({
+        where: { nrpNip: user.username },
+        data: { isAktif: false },
+      })
+      .catch(() => {});
+
+    return updated;
+  }
+
+  async getRealtimeStatus() {
+    const users = await this.prisma.user.findMany({
+      select: {
+        id: true,
+        username: true,
+        namaLengkap: true,
+        role: true,
+        isActive: true,
+        lastActiveAt: true,
+        currentSessionToken: true,
+        satminkal: { select: { nama: true } },
+      },
+      orderBy: { lastActiveAt: 'desc' },
+    });
+
+    const now = Date.now();
+    return users.map((u) => {
+      const diffMs = u.lastActiveAt ? now - new Date(u.lastActiveAt).getTime() : Infinity;
+      const isOnline = u.isActive && diffMs < 1000 * 60 * 5; // < 5 mins
+      const isIdle = u.isActive && diffMs >= 1000 * 60 * 5 && diffMs < 1000 * 60 * 30; // 5-30 mins
+
+      return {
+        id: u.id,
+        username: u.username,
+        namaLengkap: u.namaLengkap,
+        role: u.role,
+        satminkal: u.satminkal?.nama ?? '-',
+        lastActiveAt: u.lastActiveAt,
+        isActive: u.isActive,
+        isOnline,
+        isIdle,
+        isOffline: !isOnline && !isIdle,
+        statusLabel: isOnline ? 'Online (Aktif)' : isIdle ? 'Idle (Tidak Aktif Sementara)' : 'Offline',
+      };
     });
   }
 
@@ -207,17 +354,20 @@ export class UsersService {
       },
       orderBy: { lastActiveAt: 'desc' },
     });
-    return users.map((u) => ({
-      id: u.id,
-      username: u.username,
-      namaLengkap: u.namaLengkap,
-      role: u.role,
-      satminkal: u.satminkal.nama,
-      lastActiveAt: u.lastActiveAt,
-      isOnline: u.lastActiveAt
-        ? Date.now() - new Date(u.lastActiveAt).getTime() < 1000 * 60 * 15
-        : false,
-    }));
+    const now = Date.now();
+    return users.map((u) => {
+      const diffMs = u.lastActiveAt ? now - new Date(u.lastActiveAt).getTime() : Infinity;
+      return {
+        id: u.id,
+        username: u.username,
+        namaLengkap: u.namaLengkap,
+        role: u.role,
+        satminkal: u.satminkal.nama,
+        lastActiveAt: u.lastActiveAt,
+        isOnline: diffMs < 1000 * 60 * 5,
+        isIdle: diffMs >= 1000 * 60 * 5 && diffMs < 1000 * 60 * 30,
+      };
+    });
   }
 
   async terminateSession(id: string) {

@@ -18,6 +18,7 @@ import { JwtUser } from '../common/interfaces/jwt-user.interface';
 import { decimal, toNumber } from '../common/utils/decimal.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { SimpananMassalDto } from './dto/simpanan-massal.dto';
+import { BatchSimpananGolonganDto } from './dto/batch-simpanan.dto';
 
 @Injectable()
 export class SimpananService {
@@ -32,8 +33,14 @@ export class SimpananService {
   }
 
   async rekapSatminkal(user: JwtUser) {
+    const isAnggota =
+      user.role === Role.ANGGOTA || (user.role as any) === 'Anggota';
     const anggota = await this.prisma.anggota.findMany({
-      where: { satminkalId: user.satminkalId, isAktif: true },
+      where: {
+        satminkalId: user.satminkalId,
+        isAktif: true,
+        ...(isAnggota ? { nrpNip: user.username } : {}),
+      },
       include: {
         pangkat: true,
         korps: true,
@@ -88,6 +95,9 @@ export class SimpananService {
   }
 
   async setPokokWajib(user: JwtUser, anggotaId: string) {
+    if (user.role === Role.ANGGOTA || (user.role as any) === 'Anggota') {
+      throw new BadRequestException('Pencatatan simpanan pokok/wajib hanya dapat dilakukan oleh Bendahara/Admin');
+    }
     const anggota = await this.assertAnggotaScope(user, anggotaId);
 
     const existing = await this.prisma.simpanan.count({
@@ -154,6 +164,9 @@ export class SimpananService {
     user: JwtUser,
     dto: { nominalPokok?: number; nominalWajib?: number; nominalKhusus?: number },
   ) {
+    if (user.role === Role.ANGGOTA || (user.role as any) === 'Anggota') {
+      throw new BadRequestException('Hanya pengurus koperasi yang berhak mengubah pengaturan nominal');
+    }
     const data: any = {};
     if (dto.nominalPokok !== undefined) data.nominalSimpananPokok = decimal(dto.nominalPokok);
     if (dto.nominalWajib !== undefined) data.nominalSimpananWajib = decimal(dto.nominalWajib);
@@ -188,6 +201,9 @@ export class SimpananService {
       keterangan?: string;
     },
   ) {
+    if (user.role === Role.ANGGOTA || (user.role as any) === 'Anggota') {
+      throw new BadRequestException('Setor simpanan hanya dapat dilakukan oleh Bendahara');
+    }
     await this.assertAnggotaScope(user, dto.anggotaId);
 
     if (dto.nominal <= 0) {
@@ -211,10 +227,15 @@ export class SimpananService {
   async rekapSimpananBulanan(user: JwtUser, bulan: number, tahun: number) {
     const startDate = new Date(Date.UTC(tahun, bulan - 1, 1));
     const endDate = new Date(Date.UTC(tahun, bulan, 1));
+    const isAnggota =
+      user.role === Role.ANGGOTA || (user.role as any) === 'Anggota';
 
     const simpananList = await this.prisma.simpanan.findMany({
       where: {
-        anggota: { satminkalId: user.satminkalId },
+        anggota: {
+          satminkalId: user.satminkalId,
+          ...(isAnggota ? { nrpNip: user.username } : {}),
+        },
         createdAt: { gte: startDate, lt: endDate },
       },
       include: {
@@ -353,9 +374,151 @@ export class SimpananService {
     if (!anggota) {
       throw new NotFoundException('Anggota tidak ditemukan di Satminkal Anda');
     }
-    if (user.role === Role.ANGGOTA && anggota.nrpNip !== user.username) {
+    if ((user.role === Role.ANGGOTA || (user.role as any) === 'Anggota') && anggota.nrpNip !== user.username) {
       throw new BadRequestException('Anda hanya diizinkan mengakses data akun Anda sendiri');
     }
     return anggota;
+  }
+
+  // ========== BATCH SIMPANAN DARI EXCEL GOLONGAN (Bendahara / Admin) ==========
+
+  async batchSimpananGolongan(user: JwtUser, dto: BatchSimpananGolonganDto) {
+    if (user.role === Role.ANGGOTA || (user.role as any) === 'Anggota') {
+      throw new BadRequestException('Hanya Bendahara yang dapat mengunggah file Excel simpanan massal');
+    }
+    if (!dto.rates || dto.rates.length === 0) {
+      throw new BadRequestException('Data tarif golongan tidak boleh kosong');
+    }
+
+    // Normalisasi periode tanggal (default tgl 1 bulan berjalan jika tidak ada)
+    let periodeDate = new Date();
+    if (dto.periode) {
+      const parts = dto.periode.split('-');
+      if (parts.length >= 2) {
+        periodeDate = new Date(Date.UTC(+parts[0], +parts[1] - 1, 1));
+      }
+    }
+
+    // Pemetaan Rate per Golongan
+    const rateMap = new Map<string, { pokok: number; wajib: number }>();
+    for (const r of dto.rates) {
+      const key = this.matchGolonganKey(r.golongan);
+      rateMap.set(key, {
+        pokok: Math.max(0, Number(r.nominalPokok) || 0),
+        wajib: Math.max(0, Number(r.nominalWajib) || 0),
+      });
+    }
+
+    // Ambil seluruh anggota aktif di Satminkal ini
+    const anggotaList = await this.prisma.anggota.findMany({
+      where: { satminkalId: user.satminkalId, isAktif: true },
+      include: {
+        pangkat: true,
+        korps: true,
+      },
+    });
+
+    if (anggotaList.length === 0) {
+      throw new BadRequestException('Tidak ada data anggota aktif di Satuan ini');
+    }
+
+    const newEntries: any[] = [];
+    let totalPokok = 0;
+    let totalWajib = 0;
+
+    const rincianPerAnggota: any[] = [];
+
+    for (const a of anggotaList) {
+      const golongan = this.mapKategoriToGolongan(a.pangkat?.kategori || '');
+      const rate = rateMap.get(golongan) || { pokok: 0, wajib: 0 };
+
+      let potongPokok = rate.pokok;
+      let potongWajib = rate.wajib;
+
+      if (potongPokok > 0) {
+        newEntries.push({
+          anggotaId: a.id,
+          jenis: JenisSimpanan.POKOK,
+          tipe: JenisTransaksiSimpanan.SETOR,
+          nominal: decimal(potongPokok),
+          periode: periodeDate,
+          keterangan: dto.keterangan ? `${dto.keterangan} - Pokok (${golongan})` : `Simpanan Pokok via Excel (${golongan})`,
+        });
+        totalPokok += potongPokok;
+      }
+
+      if (potongWajib > 0) {
+        newEntries.push({
+          anggotaId: a.id,
+          jenis: JenisSimpanan.WAJIB,
+          tipe: JenisTransaksiSimpanan.SETOR,
+          nominal: decimal(potongWajib),
+          periode: periodeDate,
+          keterangan: dto.keterangan ? `${dto.keterangan} - Wajib (${golongan})` : `Simpanan Wajib via Excel (${golongan})`,
+        });
+        totalWajib += potongWajib;
+      }
+
+      rincianPerAnggota.push({
+        id: a.id,
+        nama: a.nama,
+        nrpNip: a.nrpNip,
+        pangkat: a.pangkat?.nama ?? '-',
+        kategoriPangkat: a.pangkat?.kategori ?? '-',
+        korps: a.korps?.nama ?? a.korps?.kode ?? '-',
+        golongan,
+        simpananPokok: potongPokok,
+        simpananWajib: potongWajib,
+        totalPotongan: potongPokok + potongWajib,
+      });
+    }
+
+    if (newEntries.length > 0) {
+      await this.prisma.simpanan.createMany({
+        data: newEntries,
+      });
+    }
+
+    // Urutkan rincian anggota berdasarkan hierarki golongan: Pati -> Pamen -> Pama -> Ba/Ta/Pns
+    const HIERARKI_ORDER: Record<string, number> = {
+      Pati: 1,
+      Pamen: 2,
+      Pama: 3,
+      'Ba/Ta/Pns': 4,
+    };
+
+    rincianPerAnggota.sort((a, b) => {
+      const orderA = HIERARKI_ORDER[a.golongan] ?? 99;
+      const orderB = HIERARKI_ORDER[b.golongan] ?? 99;
+      if (orderA !== orderB) return orderA - orderB;
+      return a.nama.localeCompare(b.nama);
+    });
+
+    return {
+      message: 'Simpanan Pokok & Wajib via Excel berhasil diproses ke database',
+      periode: periodeDate.toISOString().slice(0, 7),
+      totalAnggota: anggotaList.length,
+      totalTransaksi: newEntries.length,
+      totalPokok,
+      totalWajib,
+      totalNominal: totalPokok + totalWajib,
+      rincian: rincianPerAnggota,
+    };
+  }
+
+  private mapKategoriToGolongan(kategori: string): 'Pati' | 'Pamen' | 'Pama' | 'Ba/Ta/Pns' {
+    const kat = (kategori || '').toUpperCase();
+    if (kat.includes('PATI')) return 'Pati';
+    if (kat.includes('PAMEN')) return 'Pamen';
+    if (kat.includes('PAMA')) return 'Pama';
+    return 'Ba/Ta/Pns';
+  }
+
+  private matchGolonganKey(golonganInput: string): 'Pati' | 'Pamen' | 'Pama' | 'Ba/Ta/Pns' {
+    const g = (golonganInput || '').toLowerCase().trim();
+    if (g.includes('pati')) return 'Pati';
+    if (g.includes('pamen')) return 'Pamen';
+    if (g.includes('pama')) return 'Pama';
+    return 'Ba/Ta/Pns';
   }
 }

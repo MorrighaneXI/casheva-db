@@ -12,6 +12,163 @@ export class DashboardService {
     const satminkalId = user.satminkalId;
     const currentYear = new Date().getFullYear();
 
+    // JIKA USER ADALAH ANGGOTA: Hitung metrik personal anggota yang bersangkutan
+    if (user.role === 'ANGGOTA' || (user.role as any) === 'Anggota') {
+      let anggota = await this.prisma.anggota.findFirst({
+        where: {
+          satminkalId,
+          nrpNip: user.username,
+        },
+        include: {
+          pangkat: true,
+          korps: true,
+          satminkal: true,
+        },
+      });
+
+      if (!anggota) {
+        anggota = await this.prisma.anggota.findFirst({
+          where: {
+            nrpNip: user.username,
+          },
+          include: {
+            pangkat: true,
+            korps: true,
+            satminkal: true,
+          },
+        });
+      }
+
+      if (anggota) {
+        // 1. Simpanan Personal Anggota
+        const simpananRows = await this.prisma.simpanan.findMany({
+          where: { anggotaId: anggota.id },
+          select: { tipe: true, nominal: true, jenis: true },
+        });
+        const totalSimpanan = simpananRows.reduce((acc, row) => {
+          const val = toNumber(row.nominal);
+          return row.tipe === 'SETOR' ? acc + val : acc - val;
+        }, 0);
+
+        const totalSimpananPokok = simpananRows
+          .filter((r) => r.jenis === 'POKOK')
+          .reduce((acc, r) => (r.tipe === 'SETOR' ? acc + toNumber(r.nominal) : acc - toNumber(r.nominal)), 0);
+
+        const totalSimpananWajib = simpananRows
+          .filter((r) => r.jenis === 'WAJIB')
+          .reduce((acc, r) => (r.tipe === 'SETOR' ? acc + toNumber(r.nominal) : acc - toNumber(r.nominal)), 0);
+
+        const totalSimpananSukarela = simpananRows
+          .filter((r) => r.jenis === 'SUKARELA' || r.jenis === 'KHUSUS')
+          .reduce((acc, r) => (r.tipe === 'SETOR' ? acc + toNumber(r.nominal) : acc - toNumber(r.nominal)), 0);
+
+        // 2. Pinjaman Personal Anggota
+        const pinjamanList = await this.prisma.pinjaman.findMany({
+          where: {
+            anggotaId: anggota.id,
+            status: { notIn: [StatusPinjaman.DITOLAK, StatusPinjaman.DIAJUKAN] },
+          },
+          select: { nominal: true, status: true, sisaPokok: true },
+        });
+        const totalPinjaman = pinjamanList.reduce(
+          (acc, p) => acc + toNumber(p.nominal),
+          0,
+        );
+
+        const pinjamanBerjalanRows = pinjamanList.filter(
+          (p) => p.status === StatusPinjaman.DICAIRKAN,
+        );
+        const totalPinjamanBerjalan = pinjamanBerjalanRows.reduce(
+          (acc, p) => acc + toNumber(p.sisaPokok ?? p.nominal),
+          0,
+        );
+        const countPinjamanBerjalan = pinjamanBerjalanRows.length;
+
+        // 3. Angsuran Bulan Ini Personal Anggota
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const angsuranList = await this.prisma.angsuran.findMany({
+          where: {
+            pinjaman: {
+              anggotaId: anggota.id,
+              status: StatusPinjaman.DICAIRKAN,
+            },
+          },
+          orderBy: { bulanKe: 'asc' },
+        });
+
+        const angsuranBulanIniItem =
+          angsuranList.find(
+            (a) =>
+              new Date(a.jatuhTempo).getMonth() === currentMonth &&
+              new Date(a.jatuhTempo).getFullYear() === currentYear,
+          ) || angsuranList.find((a) => !a.dibayar);
+
+        const angsuranBulanIni = angsuranBulanIniItem
+          ? toNumber(angsuranBulanIniItem.total)
+          : 0;
+        const statusAngsuranBulanIni = angsuranBulanIniItem
+          ? angsuranBulanIniItem.dibayar
+          : true;
+
+        // 4. Estimasi SHU Personal (Berdasarkan proporsi simpanan terhadap total simpanan koperasi)
+        const allSimpananRows = await this.prisma.simpanan.findMany({
+          where: { anggota: { satminkalId } },
+          select: { tipe: true, nominal: true },
+        });
+        const totalSimpananSatminkal = allSimpananRows.reduce((acc, r) => {
+          const v = toNumber(r.nominal);
+          return r.tipe === 'SETOR' ? acc + v : acc - v;
+        }, 0);
+
+        const aggregatePendapatan = await this.prisma.pendapatan.aggregate({
+          where: { satminkalId, tahun: currentYear },
+          _sum: { nominal: true },
+        });
+        const aggregateBiaya = await this.prisma.biayaOperasional.aggregate({
+          where: { tahun: currentYear },
+          _sum: { nominal: true },
+        });
+        const totalPendapatanYear = toNumber(aggregatePendapatan._sum.nominal ?? 0);
+        const totalBiayaYear = toNumber(aggregateBiaya._sum.nominal ?? 0);
+        const shuSatminkal = Math.max(0, totalPendapatanYear - totalBiayaYear);
+
+        const shuTahunBerjalan =
+          totalSimpananSatminkal > 0 && totalSimpanan > 0
+            ? Math.round(
+                (totalSimpanan / totalSimpananSatminkal) * (shuSatminkal * 0.7),
+              )
+            : 0;
+
+        return {
+          isAnggota: true,
+          anggota: {
+            id: anggota.id,
+            nama: anggota.nama,
+            nrpNip: anggota.nrpNip,
+            pangkat: anggota.pangkat?.nama ?? '-',
+            kategoriPangkat: anggota.pangkat?.kategori ?? '-',
+            korps: anggota.korps?.nama ?? anggota.korps?.kode ?? '-',
+            satminkal: anggota.satminkal?.nama ?? 'INFOLAHTADAM IV/DIPONEGORO',
+          },
+          totalAnggota: 1,
+          totalSimpanan,
+          totalSimpananPokok,
+          totalSimpananWajib,
+          totalSimpananSukarela,
+          totalPinjaman,
+          totalPinjamanBerjalan,
+          countPinjamanBerjalan,
+          angsuranBulanIni,
+          statusAngsuranBulanIni,
+          kasKoperasi: 0,
+          shuTahunBerjalan,
+          tahun: currentYear,
+        };
+      }
+    }
+
+    // ========== SUMMARY KOPERASI / PENGURUS (Admin, Bendahara, Keprim, dll.) ==========
     // 1. Total Anggota Aktif
     const totalAnggota = await this.prisma.anggota.count({
       where: { satminkalId, isAktif: true },
@@ -87,6 +244,7 @@ export class DashboardService {
       totalSimpanan + totalAngsuranDibayar - totalPencairan - totalBiayaYear;
 
     return {
+      isAnggota: false,
       totalAnggota,
       totalSimpanan,
       totalPinjaman,
@@ -101,6 +259,8 @@ export class DashboardService {
   async getCharts(user: JwtUser, tahun?: number) {
     const targetYear = tahun || new Date().getFullYear();
     const satminkalId = user.satminkalId;
+    const isAnggota =
+      user.role === 'ANGGOTA' || (user.role as any) === 'Anggota';
 
     const monthNames = [
       'Jan',
@@ -120,7 +280,10 @@ export class DashboardService {
     // Data Simpanan Bulanan per Bulan
     const simpananList = await this.prisma.simpanan.findMany({
       where: {
-        anggota: { satminkalId },
+        anggota: {
+          satminkalId,
+          ...(isAnggota ? { nrpNip: user.username } : {}),
+        },
         createdAt: {
           gte: new Date(`${targetYear}-01-01`),
           lt: new Date(`${targetYear + 1}-01-01`),
@@ -132,7 +295,10 @@ export class DashboardService {
     // Data Pinjaman Bulanan (pencairan)
     const pinjamanList = await this.prisma.pinjaman.findMany({
       where: {
-        anggota: { satminkalId },
+        anggota: {
+          satminkalId,
+          ...(isAnggota ? { nrpNip: user.username } : {}),
+        },
         tanggalCair: {
           gte: new Date(`${targetYear}-01-01`),
           lt: new Date(`${targetYear + 1}-01-01`),
@@ -145,7 +311,12 @@ export class DashboardService {
     // Data Angsuran Bulanan (pembayaran)
     const angsuranList = await this.prisma.angsuran.findMany({
       where: {
-        pinjaman: { anggota: { satminkalId } },
+        pinjaman: {
+          anggota: {
+            satminkalId,
+            ...(isAnggota ? { nrpNip: user.username } : {}),
+          },
+        },
         dibayar: true,
         tanggalBayar: {
           gte: new Date(`${targetYear}-01-01`),

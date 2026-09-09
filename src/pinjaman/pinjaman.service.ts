@@ -78,7 +78,8 @@ export class PinjamanService {
   constructor(private readonly prisma: PrismaService) {}
 
   findAll(user: JwtUser, status?: StatusPinjaman) {
-    const isAnggota = user.role === Role.ANGGOTA;
+    const isAnggota =
+      user.role === Role.ANGGOTA || (user.role as any) === 'Anggota';
     return this.prisma.pinjaman.findMany({
       where: {
         anggota: {
@@ -94,8 +95,14 @@ export class PinjamanService {
 
   // Hitung sisa kuota plafond pinjaman anggota berdasarkan kategori pangkat
   async getPlafondInfo(user: JwtUser, anggotaId: string) {
+    const isAnggota =
+      user.role === Role.ANGGOTA || (user.role as any) === 'Anggota';
     const anggota = await this.prisma.anggota.findFirst({
-      where: { id: anggotaId, satminkalId: user.satminkalId },
+      where: {
+        id: anggotaId,
+        satminkalId: user.satminkalId,
+        ...(isAnggota ? { nrpNip: user.username } : {}),
+      },
       include: { pangkat: true },
     });
     if (!anggota) {
@@ -136,10 +143,17 @@ export class PinjamanService {
   async rekapAngsuranBulanan(user: JwtUser, bulan: number, tahun: number) {
     const startDate = new Date(Date.UTC(tahun, bulan - 1, 1));
     const endDate = new Date(Date.UTC(tahun, bulan, 1));
+    const isAnggota =
+      user.role === Role.ANGGOTA || (user.role as any) === 'Anggota';
 
     const angsuranList = await this.prisma.angsuran.findMany({
       where: {
-        pinjaman: { anggota: { satminkalId: user.satminkalId } },
+        pinjaman: {
+          anggota: {
+            satminkalId: user.satminkalId,
+            ...(isAnggota ? { nrpNip: user.username } : {}),
+          },
+        },
         jatuhTempo: { gte: startDate, lt: endDate },
       },
       include: {
@@ -194,6 +208,9 @@ export class PinjamanService {
   }
 
   async updatePengaturanBunga(user: JwtUser, dto: UpdateBungaDto) {
+    if (user.role === Role.ANGGOTA || (user.role as any) === 'Anggota') {
+      throw new BadRequestException('Pengaturan suku bunga pinjaman hanya dapat diubah oleh Bendahara/Admin');
+    }
     return this.prisma.$transaction(async (tx) => {
       const setting = await tx.pengaturanKoperasi.upsert({
         where: { satminkalId: user.satminkalId },
@@ -224,8 +241,16 @@ export class PinjamanService {
   }
 
   async findOne(user: JwtUser, id: string) {
+    const isAnggota =
+      user.role === Role.ANGGOTA || (user.role as any) === 'Anggota';
     const row = await this.prisma.pinjaman.findFirst({
-      where: { id, anggota: { satminkalId: user.satminkalId } },
+      where: {
+        id,
+        anggota: {
+          satminkalId: user.satminkalId,
+          ...(isAnggota ? { nrpNip: user.username } : {}),
+        },
+      },
       include: pinjamanInclude,
     });
     if (!row) {
@@ -252,7 +277,7 @@ export class PinjamanService {
       throw new NotFoundException('Anggota aktif tidak ditemukan');
     }
 
-    if (user.role === Role.ANGGOTA && anggota.nrpNip !== user.username) {
+    if ((user.role === Role.ANGGOTA || (user.role as any) === 'Anggota') && anggota.nrpNip !== user.username) {
       throw new BadRequestException('Anggota hanya dapat mengajukan pinjaman untuk dirinya sendiri');
     }
 
@@ -324,6 +349,9 @@ export class PinjamanService {
   }
 
   async updateStatus(user: JwtUser, id: string, dto: UpdateStatusPinjamanDto) {
+    if (user.role === Role.ANGGOTA || (user.role as any) === 'Anggota') {
+      throw new BadRequestException('Anggota tidak memiliki wewenang untuk mengubah status persetujuan');
+    }
     const pinjaman = await this.findOne(user, id);
     const next = dto.status;
     const allowed = ALLOWED_TRANSITIONS[pinjaman.status] ?? [];
@@ -345,6 +373,9 @@ export class PinjamanService {
   }
 
   async cairkan(user: JwtUser, id: string, dto?: CairkanPinjamanDto) {
+    if (user.role === Role.ANGGOTA || (user.role as any) === 'Anggota') {
+      throw new BadRequestException('Pencairan pinjaman hanya dapat diproses oleh Bendahara');
+    }
     const pinjaman = await this.findOne(user, id);
     const validCairStatuses: StatusPinjaman[] = [
       StatusPinjaman.MENUNGGU_DOKUMEN,
@@ -402,6 +433,9 @@ export class PinjamanService {
   }
 
   async bayarAngsuran(user: JwtUser, angsuranId: string) {
+    if (user.role === Role.ANGGOTA || (user.role as any) === 'Anggota') {
+      throw new BadRequestException('Pembayaran angsuran hanya dapat diproses oleh Juru Bayar / Bendahara');
+    }
     const angsuran = await this.prisma.angsuran.findFirst({
       where: {
         id: angsuranId,
@@ -474,6 +508,9 @@ export class PinjamanService {
     pinjamanId: string,
     dto?: PelunasanDipercepatDto,
   ) {
+    if (user.role === Role.ANGGOTA || (user.role as any) === 'Anggota') {
+      throw new BadRequestException('Pelunasan dipercepat hanya dapat diproses oleh Juru Bayar / Bendahara');
+    }
     const pinjaman = await this.findOne(user, pinjamanId);
 
     if (pinjaman.status !== StatusPinjaman.DICAIRKAN) {
