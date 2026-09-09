@@ -20,6 +20,7 @@ import { StatusPinjaman } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtUser } from '../common/interfaces/jwt-user.interface';
 import {
+  BayarAngsuranDinamisDto,
   CairkanPinjamanDto,
   CreatePinjamanDto,
   PelunasanDipercepatDto,
@@ -184,5 +185,26 @@ export class PinjamanController {
     @Body() dto?: PelunasanDipercepatDto,
   ) {
     return this.pinjamanService.pelunasanDipercepat(user, id, dto);
+  }
+
+  @Get(':id/kalkulasi-dinamis')
+  @ApiOperation({ summary: 'Kalkulasi dinamis angsuran, sisa pokok, 2x bunga pelunasan, toleransi 2 bulan & status blacklist' })
+  @ApiResponse({ status: 200, description: 'Rincian kalkulasi dinamis' })
+  getKalkulasiDinamis(
+    @CurrentUser() user: JwtUser,
+    @Param('id') id: string,
+  ) {
+    return this.pinjamanService.getKalkulasiDinamis(user, id);
+  }
+
+  @Post(':id/bayar-dinamis')
+  @ApiOperation({ summary: 'Bayar angsuran dinamis (prioritas bunga, sisa ke pokok, opsi 2x bunga pelunasan)' })
+  @ApiResponse({ status: 200, description: 'Pembayaran angsuran dinamis berhasil diproses' })
+  bayarDinamis(
+    @CurrentUser() user: JwtUser,
+    @Param('id') id: string,
+    @Body() dto: BayarAngsuranDinamisDto,
+  ) {
+    return this.pinjamanService.bayarDinamis(user, id, dto);
   }
 }

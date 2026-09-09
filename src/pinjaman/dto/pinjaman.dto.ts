@@ -101,3 +101,45 @@ export class UpdateBungaDto {
   @IsString()
   keterangan?: string;
 }
+
+export class BayarAngsuranDinamisDto {
+  @ApiProperty({
+    example: 110_000,
+    description: 'Nominal pembayaran riil yang disetorkan (alokasi prioritas bunga, sisanya ke pokok)',
+  })
+  @IsNumber()
+  @Min(1)
+  nominalBayar!: number;
+
+  @ApiPropertyOptional({
+    example: 1,
+    description: 'Angsuran bulan keberapa yang dibayarkan (opsional, default bulan berjalan)',
+  })
+  @IsOptional()
+  @IsInt()
+  bulanKe?: number;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Apakah memilih opsi pelunasan dipercepat (sisa pokok + 2x bunga)',
+  })
+  @IsOptional()
+  isPelunasanDipercepat?: boolean;
+
+  @ApiPropertyOptional({
+    example: '2026-09-09',
+    description: 'Tanggal pembayaran (ISO)',
+  })
+  @IsOptional()
+  @IsDateString()
+  tanggalBayar?: string;
+
+  @ApiPropertyOptional({
+    example: 'Pembayaran angsuran cicilan via bendahara',
+    description: 'Catatan tambahan transaksi',
+  })
+  @IsOptional()
+  @IsString()
+  catatan?: string;
+}
+
