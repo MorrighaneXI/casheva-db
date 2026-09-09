@@ -5,6 +5,7 @@ import { JenisSimpanan } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtUser } from '../common/interfaces/jwt-user.interface';
 import { SimpananMassalDto } from './dto/simpanan-massal.dto';
+import { BatchSimpananGolonganDto } from './dto/batch-simpanan.dto';
 import { SimpananService } from './simpanan.service';
 
 @ApiTags('Simpanan')
@@ -85,5 +86,16 @@ export class SimpananController {
     @Body() dto: { anggotaId: string; jenis: JenisSimpanan; nominal: number; keterangan?: string },
   ) {
     return this.simpananService.setorSimpanan(user, dto);
+  }
+
+  @Post('batch-golongan')
+  @ApiOperation({
+    summary: 'Catat simpanan pokok & wajib serempak berdasarkan golongan dari file Excel',
+  })
+  batchGolongan(
+    @CurrentUser() user: JwtUser,
+    @Body() dto: BatchSimpananGolonganDto,
+  ) {
+    return this.simpananService.batchSimpananGolongan(user, dto);
   }
 }

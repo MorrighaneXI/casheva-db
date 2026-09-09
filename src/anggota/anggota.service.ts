@@ -26,13 +26,35 @@ export class AnggotaService {
   }
 
   async findAll(user: JwtUser, hanyaAktif?: boolean) {
-    return this.prisma.anggota.findMany({
+    const list = await this.prisma.anggota.findMany({
       where: {
         satminkalId: this.scopeSatminkal(user),
         ...(hanyaAktif === true ? { isAktif: true } : {}),
       },
       include: anggotaInclude,
       orderBy: { nama: 'asc' },
+    });
+
+    const nrps = list.map((a) => a.nrpNip);
+    const users = await this.prisma.user.findMany({
+      where: { username: { in: nrps } },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        isActive: true,
+        lastActiveAt: true,
+      },
+    });
+    const userMap = new Map(users.map((u) => [u.username, u]));
+
+    return list.map((a) => {
+      const u = userMap.get(a.nrpNip);
+      return {
+        ...a,
+        role: u?.role || Role.ANGGOTA,
+        user: u || null,
+      };
     });
   }
 
@@ -44,7 +66,21 @@ export class AnggotaService {
     if (!row) {
       throw new NotFoundException('Anggota tidak ditemukan');
     }
-    return row;
+    const matchedUser = await this.prisma.user.findUnique({
+      where: { username: row.nrpNip },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        isActive: true,
+        lastActiveAt: true,
+      },
+    });
+    return {
+      ...row,
+      role: matchedUser?.role || Role.ANGGOTA,
+      user: matchedUser || null,
+    };
   }
 
   async create(user: JwtUser, dto: CreateAnggotaDto) {
@@ -62,8 +98,8 @@ export class AnggotaService {
     const satminkalId = this.scopeSatminkal(user);
     const createdAnggota = await this.prisma.anggota.create({
       data: {
-        nama: dto.nama,
-        nrpNip: dto.nrpNip,
+        nama: dto.nama.trim(),
+        nrpNip: dto.nrpNip.trim(),
         pangkatId: dto.pangkatId,
         korpsId: dto.korpsId,
         satminkalId,
@@ -72,34 +108,42 @@ export class AnggotaService {
       include: anggotaInclude,
     });
 
-    // Auto-create login account (User) with username = NRP and default password Admin123!
-    const existingUser = await this.prisma.user.findUnique({
-      where: { username: dto.nrpNip },
+    // Auto-create / synchronize login account (User)
+    const targetRole = dto.role || Role.ANGGOTA;
+    const initialPass = dto.password || 'Admin123!';
+    const hashedPassword = await bcrypt.hash(initialPass, 10);
+
+    const satminkal = await this.prisma.satminkal.findUnique({
+      where: { id: satminkalId },
     });
-    if (!existingUser) {
-      const defaultPasswordHash = await bcrypt.hash('Admin123!', 10);
-      const satminkal = await this.prisma.satminkal.findUnique({
-        where: { id: satminkalId },
+
+    if (satminkal) {
+      await this.prisma.user.upsert({
+        where: { username: dto.nrpNip.trim() },
+        create: {
+          username: dto.nrpNip.trim(),
+          password: hashedPassword,
+          namaLengkap: dto.nama.trim(),
+          role: targetRole,
+          kotamaId: satminkal.kotamaId,
+          satminkalId: satminkal.id,
+          isActive: true,
+        },
+        update: {
+          namaLengkap: dto.nama.trim(),
+          role: targetRole,
+          satminkalId: satminkal.id,
+          kotamaId: satminkal.kotamaId,
+          isActive: true,
+        },
       });
-      if (satminkal) {
-        await this.prisma.user.create({
-          data: {
-            username: dto.nrpNip,
-            password: defaultPasswordHash,
-            namaLengkap: dto.nama,
-            role: Role.ANGGOTA,
-            kotamaId: satminkal.kotamaId,
-            satminkalId: satminkal.id,
-          },
-        });
-      }
     }
 
     return createdAnggota;
   }
 
   async update(user: JwtUser, id: string, dto: UpdateAnggotaDto) {
-    await this.findOne(user, id);
+    const existing = await this.findOne(user, id);
 
     if (dto.pangkatId || dto.korpsId) {
       await this.assertMasterRefs(
@@ -108,11 +152,11 @@ export class AnggotaService {
       );
     }
 
-    return this.prisma.anggota.update({
+    const updated = await this.prisma.anggota.update({
       where: { id },
       data: {
-        nama: dto.nama,
-        nrpNip: dto.nrpNip,
+        nama: dto.nama !== undefined ? dto.nama.trim() : undefined,
+        nrpNip: dto.nrpNip !== undefined ? dto.nrpNip.trim() : undefined,
         pangkatId: dto.pangkatId,
         korpsId: dto.korpsId,
         isAktif: dto.isAktif,
@@ -120,6 +164,25 @@ export class AnggotaService {
       },
       include: anggotaInclude,
     });
+
+    // Synchronize corresponding User record (including Role & Password if supplied)
+    const updateUserData: any = {};
+    if (dto.nama) updateUserData.namaLengkap = dto.nama.trim();
+    if (dto.nrpNip) updateUserData.username = dto.nrpNip.trim();
+    if (dto.isAktif !== undefined) updateUserData.isActive = dto.isAktif;
+    if (dto.role) updateUserData.role = dto.role;
+    if (dto.password) updateUserData.password = await bcrypt.hash(dto.password, 10);
+
+    if (Object.keys(updateUserData).length > 0) {
+      await this.prisma.user
+        .updateMany({
+          where: { username: existing.nrpNip },
+          data: updateUserData,
+        })
+        .catch(() => {});
+    }
+
+    return updated;
   }
 
   async remove(user: JwtUser, id: string) {
@@ -137,7 +200,16 @@ export class AnggotaService {
       where: { id: anggota.id },
       data: { isAktif: false },
     });
-    return { message: 'Anggota dinonaktifkan' };
+
+    // Also deactivate User login
+    await this.prisma.user
+      .updateMany({
+        where: { username: anggota.nrpNip },
+        data: { isActive: false, currentSessionToken: null },
+      })
+      .catch(() => {});
+
+    return { message: 'Anggota dan akun login dinonaktifkan' };
   }
 
   private async getPangkatId(anggotaId: string) {

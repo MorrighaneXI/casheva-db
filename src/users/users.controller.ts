@@ -13,6 +13,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Role } from '@prisma/client';
 
 @ApiTags('Users')
 @ApiBearerAuth('JWT-auth')
@@ -33,10 +34,22 @@ export class UsersController {
     return this.usersService.findAll();
   }
 
+  @ApiOperation({ summary: 'Status realtime online/offline seluruh user' })
+  @Get('realtime-status')
+  getRealtimeStatus() {
+    return this.usersService.getRealtimeStatus();
+  }
+
   @ApiOperation({ summary: 'Daftar sesi user yang sedang aktif' })
   @Get('active-sessions')
   getActiveSessions() {
     return this.usersService.getActiveSessions();
+  }
+
+  @ApiOperation({ summary: 'Ubah role user secara dinamis (Admin)' })
+  @Patch(':id/role')
+  updateRole(@Param('id') id: string, @Body('role') role: Role) {
+    return this.usersService.updateRole(id, role);
   }
 
   @ApiOperation({ summary: 'Akhiri sesi user tertentu (Admin)' })
@@ -63,3 +76,4 @@ export class UsersController {
     return this.usersService.remove(id);
   }
 }
+
