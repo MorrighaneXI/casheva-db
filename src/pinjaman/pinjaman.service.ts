@@ -21,7 +21,7 @@ import {
 } from './dto/pinjaman.dto';
 
 const pinjamanInclude = {
-  anggota: { include: { pangkat: true, korps: true } },
+  anggota: { include: { pangkat: true, korps: true, satminkal: true } },
   angsuran: { orderBy: { bulanKe: 'asc' as const } },
   dokumen: { orderBy: { uploadedAt: 'desc' as const } },
 } as const;
@@ -182,7 +182,7 @@ export class PinjamanService {
       include: {
         pinjaman: {
           include: {
-            anggota: { include: { pangkat: true, korps: true } },
+            anggota: { include: { pangkat: true, korps: true, satminkal: true } },
           },
         },
       },
