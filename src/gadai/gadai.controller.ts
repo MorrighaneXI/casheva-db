@@ -14,15 +14,17 @@ import { AuthGuard } from '@nestjs/passport';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import { Role, StatusGadai, KategoriBarangGadai } from '@prisma/client';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { GadaiService } from './gadai.service';
 import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtUser } from '../common/interfaces/jwt-user.interface';
-import { StatusGadai, KategoriBarangGadai } from '@prisma/client';
 
 @ApiTags('Unit Usaha Gadai & Lelang Emas/Elektronik')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('gadai')
 export class GadaiController {
   constructor(
@@ -89,6 +91,7 @@ export class GadaiController {
   }
 
   @Patch(':id/lelang')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA, Role.KEPRIM)
   @ApiOperation({ summary: 'Masukkan barang jatuh tempo ke etalase lelang' })
   jadwalkanLelang(
     @CurrentUser() user: JwtUser,

@@ -26,10 +26,14 @@ export class AnggotaService {
   }
 
   async findAll(user: JwtUser, hanyaAktif?: boolean) {
+    const isAnggota =
+      user.role === Role.ANGGOTA || (user.role as any) === 'Anggota';
+
     const list = await this.prisma.anggota.findMany({
       where: {
         satminkalId: this.scopeSatminkal(user),
         ...(hanyaAktif === true ? { isAktif: true } : {}),
+        ...(isAnggota ? { nrpNip: user.username } : {}),
       },
       include: anggotaInclude,
       orderBy: { nama: 'asc' },
@@ -59,12 +63,19 @@ export class AnggotaService {
   }
 
   async findOne(user: JwtUser, id: string) {
+    const isAnggota =
+      user.role === Role.ANGGOTA || (user.role as any) === 'Anggota';
+
     const row = await this.prisma.anggota.findFirst({
-      where: { id, satminkalId: this.scopeSatminkal(user) },
+      where: {
+        id,
+        satminkalId: this.scopeSatminkal(user),
+        ...(isAnggota ? { nrpNip: user.username } : {}),
+      },
       include: anggotaInclude,
     });
     if (!row) {
-      throw new NotFoundException('Anggota tidak ditemukan');
+      throw new NotFoundException('Anggota tidak ditemukan atau Anda tidak memiliki izin akses');
     }
     const matchedUser = await this.prisma.user.findUnique({
       where: { username: row.nrpNip },

@@ -2,21 +2,83 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { WafMiddleware } from './common/middleware/waf.middleware';
+import { RateLimiterMiddleware } from './common/middleware/rate-limiter.middleware';
+import { CsrfMiddleware } from './common/middleware/csrf.middleware';
+import { SanitizeInputInterceptor } from './common/interceptors/sanitize-input.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.useGlobalFilters(new AllExceptionsFilter());
   app.setGlobalPrefix('api');
 
   // ==========================================
-  // KONFIGURASI CORS
+  // 1. SECURITY HEADERS (Anti-Clickjacking, XSS, MIME Sniffing)
   // ==========================================
+  app.use((req: any, res: any, next: any) => {
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader(
+      'Permissions-Policy',
+      'camera=(), microphone=(), geolocation=()',
+    );
+    res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+    res.removeHeader('X-Powered-By');
+    next();
+  });
+
+  // ==========================================
+  // 2. KONFIGURASI CORS KETAT (Cross-Origin Protection)
+  // ==========================================
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://localhost:4173',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:4173',
+  ];
+
   app.enableCors({
-    origin: true, // Mengizinkan semua origin untuk kebutuhan dev (misal: frontend Vite http://localhost:5173)
+    origin: (origin, callback) => {
+      // Izinkan request tanpa origin (seperti curl, mobile app, postman dev) atau jika origin terdaftar
+      if (!origin || allowedOrigins.includes(origin) || origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+        callback(null, true);
+      } else {
+        callback(new Error('Akses diblokir oleh kebijakan CORS Casheva'));
+      }
+    },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'X-CSRF-Token',
+      'satminkal-id',
+      'Accept',
+    ],
     credentials: true,
   });
 
-  // Enable Global Validation Pipe
+  // ==========================================
+  // 3. WAF & RATE LIMITER & CSRF PROTECTION MIDDLEWARE
+  // ==========================================
+  const waf = new WafMiddleware();
+  const rateLimiter = new RateLimiterMiddleware();
+  const csrf = new CsrfMiddleware();
+
+  app.use((req: any, res: any, next: any) => waf.use(req, res, next));
+  app.use((req: any, res: any, next: any) => rateLimiter.use(req, res, next));
+  app.use((req: any, res: any, next: any) => csrf.use(req, res, next));
+
+  // ==========================================
+  // 4. GLOBAL DATA SANITIZATION & VALIDATION PIPE
+  // ==========================================
+  app.useGlobalInterceptors(new SanitizeInputInterceptor());
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

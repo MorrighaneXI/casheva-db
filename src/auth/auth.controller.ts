@@ -34,7 +34,12 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @Post('login')
   async login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+    try {
+      return await this.authService.login(dto);
+    } catch (err: any) {
+      console.error('--- AUTH LOGIN ERROR ---', err);
+      throw err;
+    }
   }
 
   @ApiOperation({ summary: 'Mendapatkan profil & session user aktif' })

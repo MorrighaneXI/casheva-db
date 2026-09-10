@@ -113,6 +113,7 @@ model User {
   isActive            Boolean        @default(true)
   currentSessionToken String?
   lastActiveAt        DateTime?
+  passwordHistories   PasswordHistory[]
   transaksiPos        TransaksiPos[] @relation("KasirTransaksi")
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
@@ -120,6 +121,17 @@ model User {
   @@index([kotamaId])
   @@index([satminkalId])
   @@map("User")
+}
+
+model PasswordHistory {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hash      String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("tb_password_history")
 }
 
 // ==========================================

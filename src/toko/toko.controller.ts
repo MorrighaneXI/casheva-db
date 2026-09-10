@@ -14,6 +14,9 @@ import { AuthGuard } from '@nestjs/passport';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
+import { Role } from '@prisma/client';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { TokoService } from './toko.service';
 import { CloudinaryService } from '../common/cloudinary/cloudinary.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -21,7 +24,7 @@ import type { JwtUser } from '../common/interfaces/jwt-user.interface';
 
 @ApiTags('Toko & Inventori Koperasi')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('toko')
 export class TokoController {
   constructor(
@@ -30,6 +33,7 @@ export class TokoController {
   ) {}
 
   @Post('upload-foto')
+  @Roles(Role.ADMIN_KOPERASI, Role.KASIR_TOKO, Role.BENDAHARA)
   @ApiOperation({ summary: 'Upload foto produk toko ke Cloudinary' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -61,6 +65,7 @@ export class TokoController {
   }
 
   @Post('kategori')
+  @Roles(Role.ADMIN_KOPERASI, Role.KASIR_TOKO, Role.BENDAHARA)
   @ApiOperation({ summary: 'Tambah kategori produk' })
   createKategori(
     @CurrentUser() user: JwtUser,
@@ -98,12 +103,14 @@ export class TokoController {
   }
 
   @Post('produk')
+  @Roles(Role.ADMIN_KOPERASI, Role.KASIR_TOKO, Role.BENDAHARA)
   @ApiOperation({ summary: 'Tambah produk baru' })
   createProduk(@CurrentUser() user: JwtUser, @Body() dto: any) {
     return this.tokoService.createProduk(user, dto);
   }
 
   @Patch('produk/:id')
+  @Roles(Role.ADMIN_KOPERASI, Role.KASIR_TOKO, Role.BENDAHARA)
   @ApiOperation({ summary: 'Update produk' })
   updateProduk(
     @CurrentUser() user: JwtUser,
@@ -114,6 +121,7 @@ export class TokoController {
   }
 
   @Post('opname')
+  @Roles(Role.ADMIN_KOPERASI, Role.KASIR_TOKO, Role.BENDAHARA)
   @ApiOperation({ summary: 'Penyesuaian stok (Stock Opname)' })
   opnameStok(
     @CurrentUser() user: JwtUser,

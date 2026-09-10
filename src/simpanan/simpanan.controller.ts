@@ -1,16 +1,18 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { JenisSimpanan } from '@prisma/client';
+import { JenisSimpanan, Role } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtUser } from '../common/interfaces/jwt-user.interface';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { SimpananMassalDto } from './dto/simpanan-massal.dto';
 import { BatchSimpananGolonganDto } from './dto/batch-simpanan.dto';
 import { SimpananService } from './simpanan.service';
 
 @ApiTags('Simpanan')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('simpanan')
 export class SimpananController {
   constructor(private readonly simpananService: SimpananService) {}
@@ -29,6 +31,7 @@ export class SimpananController {
 
   @Patch('pengaturan')
   @Post('pengaturan')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA)
   @ApiOperation({ summary: 'Ubah nominal simpanan pokok/wajib/khusus (oleh Bendahara/Admin)' })
   updatePengaturanSimpanan(
     @CurrentUser() user: JwtUser,
@@ -59,6 +62,7 @@ export class SimpananController {
   }
 
   @Post('pokok-wajib/:anggotaId')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA, Role.JURU_BAYAR)
   @ApiOperation({
     summary: 'Catat simpanan pokok & wajib pertama kali (nominal dinamis)',
   })
@@ -70,6 +74,7 @@ export class SimpananController {
   }
 
   @Post('sukarela/massal')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA, Role.JURU_BAYAR)
   @ApiOperation({
     summary: 'Input simpanan sukarela serempak seluruh anggota aktif',
   })
@@ -78,6 +83,7 @@ export class SimpananController {
   }
 
   @Post('setor')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA, Role.JURU_BAYAR)
   @ApiOperation({
     summary: 'Setor simpanan anggota (Sukarela/Khusus/Pokok/Wajib) oleh Bendahara',
   })
@@ -89,6 +95,7 @@ export class SimpananController {
   }
 
   @Post('batch-golongan')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA)
   @ApiOperation({
     summary: 'Catat simpanan pokok & wajib serempak berdasarkan golongan dari file Excel',
   })

@@ -16,9 +16,11 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { StatusPinjaman } from '@prisma/client';
+import { Role, StatusPinjaman } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtUser } from '../common/interfaces/jwt-user.interface';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import {
   BayarAngsuranDinamisDto,
   CairkanPinjamanDto,
@@ -31,7 +33,7 @@ import { PinjamanService } from './pinjaman.service';
 
 @ApiTags('Pinjaman & Angsuran')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('pinjaman')
 export class PinjamanController {
   constructor(private readonly pinjamanService: PinjamanService) {}
@@ -77,6 +79,7 @@ export class PinjamanController {
 
   @Patch('pengaturan-bunga')
   @Post('pengaturan-bunga')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA, Role.KEPRIM)
   @ApiOperation({ summary: 'Ubah suku bunga pinjaman aktif Satminkal (oleh Bendahara)' })
   @ApiResponse({ status: 200, description: 'Suku bunga berhasil diperbarui' })
   updatePengaturanBunga(
@@ -134,6 +137,7 @@ export class PinjamanController {
   }
 
   @Patch(':id/status')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA, Role.KEPRIM, Role.PIMPINAN)
   @ApiOperation({ summary: 'Ubah status alur persetujuan pinjaman' })
   @ApiResponse({
     status: 200,
@@ -152,6 +156,7 @@ export class PinjamanController {
   }
 
   @Post(':id/cairkan')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA, Role.JURU_BAYAR)
   @ApiOperation({ summary: 'Cairkan pinjaman & buat jadwal angsuran' })
   @ApiResponse({
     status: 201,
@@ -170,6 +175,7 @@ export class PinjamanController {
   }
 
   @Post(':id/pelunasan-dipercepat')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA, Role.JURU_BAYAR)
   @ApiOperation({ summary: 'Pelunasan dipercepat untuk sisa seluruh angsuran' })
   @ApiResponse({
     status: 200,
