@@ -9,10 +9,21 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { LaporanTokoService } from './laporan-toko.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtUser } from '../common/interfaces/jwt-user.interface';
+import { Role } from '@prisma/client';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 
 @ApiTags('Laporan & Analisis Toko Koperasi')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
+@Roles(
+  Role.ADMIN_KOPERASI,
+  Role.BENDAHARA,
+  Role.KEPRIM,
+  Role.PIMPINAN,
+  Role.PENGAWAS,
+  Role.KASIR_TOKO,
+)
 @Controller('laporan-toko')
 export class LaporanTokoController {
   constructor(private readonly laporanTokoService: LaporanTokoService) {}

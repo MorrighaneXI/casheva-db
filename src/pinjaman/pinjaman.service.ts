@@ -12,6 +12,7 @@ import {
 import { decimal, toNumber } from '../common/utils/decimal.util';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  BayarAngsuranDinamisDto,
   CairkanPinjamanDto,
   CreatePinjamanDto,
   PelunasanDipercepatDto,
@@ -127,12 +128,30 @@ export class PinjamanService {
 
     const sisaKuota = Math.max(0, maksPlafond - totalPinjamanAktif);
 
+    // Cek apakah anggota terkena sanksi blacklist (melewati masa toleransi 2 bulan)
+    let isBlacklist = false;
+    let sanksiKeterangan: string | null = null;
+    let sanksiHingga: string | null = null;
+
+    for (const loan of activeLoans) {
+      const jInfo = this.evaluateJatuhTempoInfo(loan as any);
+      if (jInfo.isBlacklist) {
+        isBlacklist = true;
+        sanksiKeterangan = jInfo.keterangan;
+        sanksiHingga = jInfo.sanksiBlacklistHingga;
+        break;
+      }
+    }
+
     return {
       anggotaId,
       kategoriPangkat: kategori,
       maksPlafond,
       totalPinjamanAktif,
       sisaKuota,
+      isBlacklist,
+      sanksiKeterangan,
+      sanksiHingga,
       label: kategori === KategoriPangkat.BINTARA || kategori === KategoriPangkat.BATA_ASN || kategori === KategoriPangkat.PNS
         ? 'Bintara / PNS / ASN (Maks. Rp 50.000.000)'
         : 'Perwira (Maks. Rp 100.000.000)',
@@ -279,6 +298,24 @@ export class PinjamanService {
 
     if ((user.role === Role.ANGGOTA || (user.role as any) === 'Anggota') && anggota.nrpNip !== user.username) {
       throw new BadRequestException('Anggota hanya dapat mengajukan pinjaman untuk dirinya sendiri');
+    }
+
+    // ========== VALIDASI SANKSI BLACKLIST PINJAMAN 2 TAHUN ==========
+    const activeLoansForBlacklist = await this.prisma.pinjaman.findMany({
+      where: {
+        anggotaId: dto.anggotaId,
+        status: { notIn: [StatusPinjaman.LUNAS, StatusPinjaman.DITOLAK] },
+      },
+      select: { tanggalCair: true, tenorBulan: true, sisaPokok: true, status: true },
+    });
+
+    for (const loan of activeLoansForBlacklist) {
+      const jInfo = this.evaluateJatuhTempoInfo(loan as any);
+      if (jInfo.isBlacklist) {
+        throw new BadRequestException(
+          `Pengajuan pinjaman ditolak! Anggota sedang dalam masa sanksi blacklist pinjaman selama 2 tahun akibat tunggakan angsuran melewati masa toleransi 2 bulan. Status: ${jInfo.keterangan}`,
+        );
+      }
     }
 
     // ========== VALIDASI PLAFOND BERDASARKAN KATEGORI PANGKAT ==========
@@ -578,6 +615,267 @@ export class PinjamanService {
       }
 
       return this.findOne(user, pinjamanId);
+    });
+  }
+
+  // =========================================================================
+  // LOGIKA ANGSURAN DINAMIS: TOLERANSI 2 BULAN, BLACKLIST, PELUNASAN 2X BUNGA
+  // =========================================================================
+
+  evaluateJatuhTempoInfo(pinjaman: {
+    tanggalCair: Date | null;
+    tenorBulan: number;
+    sisaPokok: any;
+    status: StatusPinjaman;
+  }) {
+    const sisaPokokNum = toNumber(pinjaman.sisaPokok ?? 0);
+    const isLunas = pinjaman.status === StatusPinjaman.LUNAS || sisaPokokNum <= 0;
+
+    if (!pinjaman.tanggalCair || isLunas) {
+      return {
+        tanggalJatuhTempo: null,
+        isLewatJatuhTempo: false,
+        toleransiHingga: null,
+        isMasaToleransi: false,
+        isLewatToleransi: false,
+        isBlacklist: false,
+        sanksiBlacklistHingga: null,
+        statusPeringatan: 'LUNAS' as const,
+        keterangan: 'Pinjaman lunas atau belum dicairkan',
+      };
+    }
+
+    const tglCair = new Date(pinjaman.tanggalCair);
+    // Tanggal Jatuh Tempo Normal = Tanggal Cair + Tenor Bulan
+    const jatuhTempo = new Date(tglCair.getFullYear(), tglCair.getMonth() + pinjaman.tenorBulan, tglCair.getDate());
+    // Masa Toleransi 2 Bulan = Tanggal Jatuh Tempo + 2 Bulan
+    const toleransiHingga = new Date(jatuhTempo.getFullYear(), jatuhTempo.getMonth() + 2, jatuhTempo.getDate());
+    // Sanksi Blacklist 2 Tahun = Toleransi Hingga + 2 Tahun
+    const sanksiBlacklistHingga = new Date(toleransiHingga.getFullYear() + 2, toleransiHingga.getMonth(), toleransiHingga.getDate());
+
+    const now = new Date();
+    const isLewatJatuhTempo = now > jatuhTempo && sisaPokokNum > 0;
+    const isMasaToleransi = isLewatJatuhTempo && now <= toleransiHingga;
+    const isLewatToleransi = now > toleransiHingga && sisaPokokNum > 0;
+    const isBlacklist = isLewatToleransi;
+
+    let statusPeringatan: 'NORMAL' | 'MASA_TOLERANSI_2_BULAN' | 'GAGAL_BAYAR_POTONG_JURU_BAYAR' | 'LUNAS' = 'NORMAL';
+    let keterangan = 'Angsuran berjalan normal';
+
+    if (isLewatToleransi) {
+      statusPeringatan = 'GAGAL_BAYAR_POTONG_JURU_BAYAR';
+      keterangan = `Melewati batas toleransi 2 bulan (${toleransiHingga.toLocaleDateString('id-ID')})! Pemotongan otomatis langsung via Juru Bayar & sanksi blacklist pinjaman 2 tahun aktif.`;
+    } else if (isMasaToleransi) {
+      statusPeringatan = 'MASA_TOLERANSI_2_BULAN';
+      keterangan = `Melewati jatuh tempo normal (${jatuhTempo.toLocaleDateString('id-ID')}). Berada dalam masa toleransi 2 bulan (hingga ${toleransiHingga.toLocaleDateString('id-ID')}).`;
+    }
+
+    return {
+      tanggalJatuhTempo: jatuhTempo.toISOString(),
+      isLewatJatuhTempo,
+      toleransiHingga: toleransiHingga.toISOString(),
+      isMasaToleransi,
+      isLewatToleransi,
+      isBlacklist,
+      sanksiBlacklistHingga: sanksiBlacklistHingga.toISOString(),
+      statusPeringatan,
+      keterangan,
+    };
+  }
+
+  async getKalkulasiDinamis(user: JwtUser, pinjamanId: string) {
+    const pinjaman = await this.findOne(user, pinjamanId);
+    if (pinjaman.status !== StatusPinjaman.DICAIRKAN && pinjaman.status !== StatusPinjaman.LUNAS) {
+      throw new BadRequestException('Pinjaman belum dicairkan');
+    }
+
+    const nominalAwal = toNumber(pinjaman.nominal);
+    const sisaPokok = toNumber(pinjaman.sisaPokok ?? pinjaman.nominal);
+    const tenorBulan = pinjaman.tenorBulan;
+    const bungaPersenTahun = toNumber(pinjaman.bungaPersenTahun ?? 12);
+    const bungaBulanan = Math.round(nominalAwal * (bungaPersenTahun / 100 / 12));
+    const pokokBulanan = Math.round(nominalAwal / tenorBulan);
+
+    const paidAngsuranCount = pinjaman.angsuran.filter((a) => a.dibayar).length;
+    const nextBulanKe = Math.min(tenorBulan, paidAngsuranCount + 1);
+
+    // Bunga tunggakan jika ada
+    const tunggakanBunga = 0;
+    const totalKewajibanBulanIni = pokokBulanan + bungaBulanan + tunggakanBunga;
+
+    // Sesuai koreksi user: Pelunasan dipercepat = Sisa Pokok + (2 * Bunga Bulanan)
+    const pelunasanDipercepatPokok = sisaPokok;
+    const pelunasanDipercepatBunga = 2 * bungaBulanan;
+    const totalPelunasanDipercepat = pelunasanDipercepatPokok + pelunasanDipercepatBunga;
+
+    const jatuhTempoInfo = this.evaluateJatuhTempoInfo(pinjaman);
+
+    return {
+      pinjamanId: pinjaman.id,
+      anggota: {
+        id: pinjaman.anggota.id,
+        nama: pinjaman.anggota.nama,
+        nrpNip: pinjaman.anggota.nrpNip,
+        pangkat: pinjaman.anggota.pangkat?.nama,
+        korps: pinjaman.anggota.korps?.nama,
+      },
+      nominalAwal,
+      sisaPokok,
+      tenorBulan,
+      bungaPersenTahun,
+      bungaBulanan,
+      pokokBulanan,
+      tunggakanBunga,
+      nextBulanKe,
+      totalKewajibanBulanIni,
+      pelunasanDipercepat: {
+        sisaPokok: pelunasanDipercepatPokok,
+        pinaltiBunga2x: pelunasanDipercepatBunga,
+        totalBayar: totalPelunasanDipercepat,
+      },
+      jatuhTempoInfo,
+    };
+  }
+
+  async bayarDinamis(
+    user: JwtUser,
+    pinjamanId: string,
+    dto: BayarAngsuranDinamisDto,
+  ) {
+    if (user.role === Role.ANGGOTA || (user.role as any) === 'Anggota') {
+      throw new BadRequestException(
+        'Pembayaran angsuran hanya dapat diproses oleh Bendahara / Juru Bayar',
+      );
+    }
+
+    const pinjaman = await this.findOne(user, pinjamanId);
+    if (pinjaman.status !== StatusPinjaman.DICAIRKAN) {
+      throw new BadRequestException(
+        'Hanya pinjaman berstatus DICAIRKAN yang dapat diproses pembayaran angsurannya',
+      );
+    }
+
+    const nominalAwal = toNumber(pinjaman.nominal);
+    const sisaPokokAwal = toNumber(pinjaman.sisaPokok ?? pinjaman.nominal);
+    const bungaPersenTahun = toNumber(pinjaman.bungaPersenTahun ?? 12);
+    const bungaBulanan = Math.round(nominalAwal * (bungaPersenTahun / 100 / 12));
+    const tglBayar = dto.tanggalBayar ? new Date(dto.tanggalBayar) : new Date();
+    const tahun = tglBayar.getFullYear();
+
+    const satminkal = await this.prisma.satminkal.findUniqueOrThrow({
+      where: { id: user.satminkalId },
+    });
+    const noInvoice = await this.generateInvoice(
+      user.satminkalId,
+      satminkal.kode,
+      tahun,
+    );
+
+    return this.prisma.$transaction(async (tx) => {
+      let porsiBunga = 0;
+      let porsiPokok = 0;
+      let sisaPokokBaru = sisaPokokAwal;
+      let isLunas = false;
+
+      if (dto.isPelunasanDipercepat) {
+        // Pelunasan Dipercepat: Sisa Pokok + (2 * Bunga Bulanan)
+        porsiBunga = 2 * bungaBulanan;
+        porsiPokok = sisaPokokAwal;
+        sisaPokokBaru = 0;
+        isLunas = true;
+
+        // Tandai semua angsuran belum dibayar menjadi lunas
+        await tx.angsuran.updateMany({
+          where: { pinjamanId, dibayar: false },
+          data: {
+            dibayar: true,
+            tanggalBayar: tglBayar,
+            noInvoice,
+          },
+        });
+      } else {
+        // Pembayaran Parsial / Normal Dinamis:
+        // Prioritas utama: Melunasi Bunga dahulu, sisanya memotong Pokok
+        const nominalBayar = dto.nominalBayar;
+        const totalBungaWajib = bungaBulanan; // Bunga periode berjalan
+
+        if (nominalBayar >= totalBungaWajib) {
+          porsiBunga = totalBungaWajib;
+          porsiPokok = nominalBayar - totalBungaWajib;
+          sisaPokokBaru = Math.max(0, sisaPokokAwal - porsiPokok);
+        } else {
+          // Bayar kurang dari bunga
+          porsiBunga = nominalBayar;
+          porsiPokok = 0;
+          sisaPokokBaru = sisaPokokAwal;
+        }
+
+        if (sisaPokokBaru === 0) {
+          isLunas = true;
+        }
+
+        // Ambil jadwal angsuran pertama yang belum dibayar
+        const nextAngsuran = await tx.angsuran.findFirst({
+          where: { pinjamanId, dibayar: false },
+          orderBy: { bulanKe: 'asc' },
+        });
+
+        if (nextAngsuran) {
+          await tx.angsuran.update({
+            where: { id: nextAngsuran.id },
+            data: {
+              dibayar: true,
+              tanggalBayar: tglBayar,
+              noInvoice,
+              pokok: decimal(porsiPokok),
+              bunga: decimal(porsiBunga),
+              total: decimal(nominalBayar),
+            },
+          });
+        }
+      }
+
+      // Update Pinjaman
+      await tx.pinjaman.update({
+        where: { id: pinjamanId },
+        data: {
+          sisaPokok: decimal(sisaPokokBaru),
+          ...(isLunas ? { status: StatusPinjaman.LUNAS } : {}),
+        },
+      });
+
+      // Catat pendapatan bunga koperasi
+      if (porsiBunga > 0) {
+        await tx.pendapatan.create({
+          data: {
+            satminkalId: user.satminkalId,
+            tahun,
+            jenis: JenisPendapatan.BUNGA_PINJAMAN,
+            nominal: decimal(porsiBunga),
+            keterangan: dto.isPelunasanDipercepat
+              ? `Bunga pelunasan dipercepat (2x bunga: Rp ${porsiBunga.toLocaleString('id-ID')}) pinjaman ${pinjamanId}`
+              : `Bunga angsuran dinamis pinjaman ${pinjamanId} (${dto.catatan ?? 'Pembayaran Angsuran'})`,
+          },
+        });
+      }
+
+      return {
+        message: isLunas
+          ? 'Pinjaman Berhasil Dilunasi Penuh'
+          : 'Pembayaran Angsuran Berhasil Diproses',
+        noInvoice,
+        tanggalBayar: tglBayar.toISOString(),
+        nominalBayar: dto.isPelunasanDipercepat
+          ? porsiPokok + porsiBunga
+          : dto.nominalBayar,
+        alokasi: {
+          porsiBunga,
+          porsiPokok,
+          sisaPokokBaru,
+        },
+        isLunas,
+        pinjamanId,
+      };
     });
   }
 

@@ -5,14 +5,25 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtUser } from '../common/interfaces/jwt-user.interface';
 import { ReportsService } from './reports.service';
 
+import { Role } from '@prisma/client';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+
 @ApiTags('Reports / Cetakan')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Get('anggota')
+  @Roles(
+    Role.ADMIN_KOPERASI,
+    Role.BENDAHARA,
+    Role.KEPRIM,
+    Role.PIMPINAN,
+    Role.PENGAWAS,
+  )
   @ApiOperation({ summary: 'Laporan Cetak Daftar Anggota Koperasi (Lampiran II)' })
   getReportAnggota(@CurrentUser() user: JwtUser) {
     return this.reportsService.getReportAnggota(user);

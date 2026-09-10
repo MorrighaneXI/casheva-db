@@ -2,11 +2,13 @@ import {
   Injectable,
   ConflictException,
   NotFoundException,
+  BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { Prisma, User, Role } from '@prisma/client';
+import { Prisma, User, Role, StatusPinjaman } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -60,6 +62,11 @@ export class UsersService {
         role: dto.role,
         kotama: { connect: { id: kotamaId } },
         satminkal: { connect: { id: satminkalId } },
+        passwordHistories: {
+          create: {
+            hash: hashedPassword,
+          },
+        },
       },
       select: {
         id: true,
@@ -240,7 +247,47 @@ export class UsersService {
     }
 
     if (dto.password) {
-      updateData.password = await bcrypt.hash(dto.password, 10);
+      // 1. Ambil user lengkap beserta password saat ini
+      const currentUserRecord = await this.prisma.user.findUnique({
+        where: { id },
+        select: { password: true },
+      });
+
+      if (currentUserRecord) {
+        const isSameAsCurrent = await bcrypt.compare(
+          dto.password,
+          currentUserRecord.password,
+        );
+        if (isSameAsCurrent) {
+          throw new BadRequestException(
+            'Password baru tidak boleh sama dengan password yang sedang aktif.',
+          );
+        }
+      }
+
+      // 2. Ambil 5 riwayat password terakhir dari tb_password_history
+      const recentHistories = await this.prisma.passwordHistory.findMany({
+        where: { userId: id },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+      });
+
+      for (const history of recentHistories) {
+        const isReused = await bcrypt.compare(dto.password, history.hash);
+        if (isReused) {
+          throw new BadRequestException(
+            'Password baru tidak boleh sama dengan riwayat password yang pernah digunakan sebelumnya (Kebijakan Riwayat Password).',
+          );
+        }
+      }
+
+      const newHashed = await bcrypt.hash(dto.password, 10);
+      updateData.password = newHashed;
+      updateData.passwordHistories = {
+        create: {
+          hash: newHashed,
+        },
+      };
     }
 
     const updatedUser = await this.prisma.user.update({
@@ -279,26 +326,118 @@ export class UsersService {
     return updatedUser;
   }
 
-  async remove(id: string): Promise<Pick<User, 'id' | 'isActive'>> {
+  async remove(id: string) {
     const user = await this.findOne(id);
-    const updated = await this.prisma.user.update({
-      where: { id },
-      data: { isActive: false, currentSessionToken: null },
-      select: {
-        id: true,
-        isActive: true,
-      },
+
+    // Check if there is an associated anggota
+    const anggota = await this.prisma.anggota.findFirst({
+      where: { nrpNip: user.username },
     });
 
-    // Also deactivate anggota
-    await this.prisma.anggota
-      .updateMany({
-        where: { nrpNip: user.username },
-        data: { isAktif: false },
-      })
-      .catch(() => {});
+    if (anggota) {
+      const pinjamanAktif = await this.prisma.pinjaman.count({
+        where: {
+          anggotaId: anggota.id,
+          status: { in: [StatusPinjaman.DICAIRKAN, StatusPinjaman.SETUJU_KEPRIM] },
+        },
+      });
+      if (pinjamanAktif > 0) {
+        throw new ForbiddenException(
+          'User/Anggota tidak dapat dihapus karena masih memiliki pinjaman aktif berjalan.',
+        );
+      }
+    }
 
-    return updated;
+    try {
+      // 1. Delete associated password histories
+      await this.prisma.passwordHistory
+        .deleteMany({
+          where: { userId: id },
+        })
+        .catch(() => {});
+
+      // 2. Check if user is referenced in transaksiPos as cashier
+      const posCount = await this.prisma.transaksiPos.count({
+        where: { kasirId: id },
+      });
+
+      if (posCount > 0) {
+        // If cashier has historical POS transactions, soft delete / deactivate to preserve financial transaction logs
+        const updated = await this.prisma.user.update({
+          where: { id },
+          data: { isActive: false, currentSessionToken: null },
+          select: { id: true, username: true, namaLengkap: true, isActive: true },
+        });
+        if (anggota) {
+          await this.prisma.anggota
+            .update({
+              where: { id: anggota.id },
+              data: { isAktif: false },
+            })
+            .catch(() => {});
+        }
+        return {
+          id: updated.id,
+          username: user.username,
+          namaLengkap: user.namaLengkap,
+          message: 'Akun user dinonaktifkan karena memiliki arsip transaksi kasir POS.',
+        };
+      }
+
+      // 3. Delete user record
+      await this.prisma.user.delete({
+        where: { id },
+      });
+
+      // 4. Try deleting associated anggota record if any (if no other blocking relations)
+      if (anggota) {
+        try {
+          await this.prisma.simpanan
+            .deleteMany({
+              where: { anggotaId: anggota.id },
+            })
+            .catch(() => {});
+          await this.prisma.poinAnggota
+            .deleteMany({
+              where: { anggotaId: anggota.id },
+            })
+            .catch(() => {});
+          await this.prisma.anggota.delete({
+            where: { id: anggota.id },
+          });
+        } catch {
+          // If foreign key constraint prevents deleting anggota, deactivate it
+          await this.prisma.anggota
+            .update({
+              where: { id: anggota.id },
+              data: { isAktif: false },
+            })
+            .catch(() => {});
+        }
+      }
+
+      return {
+        id,
+        username: user.username,
+        namaLengkap: user.namaLengkap,
+        message: 'User dan data personel berhasil dihapus dari sistem.',
+      };
+    } catch {
+      // Fallback to deactivation if unforeseen foreign key constraint
+      await this.prisma.user
+        .update({
+          where: { id },
+          data: { isActive: false, currentSessionToken: null },
+        })
+        .catch(() => {});
+
+      return {
+        id,
+        username: user.username,
+        namaLengkap: user.namaLengkap,
+        message: 'User dinonaktifkan.',
+      };
+    }
   }
 
   async getRealtimeStatus() {

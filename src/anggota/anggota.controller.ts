@@ -22,9 +22,13 @@ import type { JwtUser } from 'src/common/interfaces/jwt-user.interface';
 import { CreateAnggotaDto } from './dto/create-anggota.dto';
 import { UpdateAnggotaDto } from './dto/update-anggota.dto';
 
+import { Role } from '@prisma/client';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+
 @ApiTags('Anggota Koperasi')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('anggota')
 export class AnggotaController {
   constructor(private readonly anggotaService: AnggotaService) {}
@@ -46,12 +50,14 @@ export class AnggotaController {
   }
 
   @Post()
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA)
   @ApiOperation({ summary: 'Tambah anggota baru' })
   create(@CurrentUser() user: JwtUser, @Body() dto: CreateAnggotaDto) {
     return this.anggotaService.create(user, dto);
   }
 
   @Patch(':id')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA)
   @ApiOperation({ summary: 'Ubah data anggota' })
   update(
     @CurrentUser() user: JwtUser,
@@ -62,6 +68,7 @@ export class AnggotaController {
   }
 
   @Delete(':id')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA)
   @ApiOperation({ summary: 'Nonaktifkan anggota (soft delete)' })
   remove(@CurrentUser() user: JwtUser, @Param('id') id: string) {
     return this.anggotaService.remove(user, id);

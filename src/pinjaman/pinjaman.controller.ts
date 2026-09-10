@@ -16,10 +16,13 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { StatusPinjaman } from '@prisma/client';
+import { Role, StatusPinjaman } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtUser } from '../common/interfaces/jwt-user.interface';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import {
+  BayarAngsuranDinamisDto,
   CairkanPinjamanDto,
   CreatePinjamanDto,
   PelunasanDipercepatDto,
@@ -30,7 +33,7 @@ import { PinjamanService } from './pinjaman.service';
 
 @ApiTags('Pinjaman & Angsuran')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('pinjaman')
 export class PinjamanController {
   constructor(private readonly pinjamanService: PinjamanService) {}
@@ -76,6 +79,7 @@ export class PinjamanController {
 
   @Patch('pengaturan-bunga')
   @Post('pengaturan-bunga')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA, Role.KEPRIM)
   @ApiOperation({ summary: 'Ubah suku bunga pinjaman aktif Satminkal (oleh Bendahara)' })
   @ApiResponse({ status: 200, description: 'Suku bunga berhasil diperbarui' })
   updatePengaturanBunga(
@@ -133,6 +137,7 @@ export class PinjamanController {
   }
 
   @Patch(':id/status')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA, Role.KEPRIM, Role.PIMPINAN)
   @ApiOperation({ summary: 'Ubah status alur persetujuan pinjaman' })
   @ApiResponse({
     status: 200,
@@ -151,6 +156,7 @@ export class PinjamanController {
   }
 
   @Post(':id/cairkan')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA, Role.JURU_BAYAR)
   @ApiOperation({ summary: 'Cairkan pinjaman & buat jadwal angsuran' })
   @ApiResponse({
     status: 201,
@@ -169,6 +175,7 @@ export class PinjamanController {
   }
 
   @Post(':id/pelunasan-dipercepat')
+  @Roles(Role.ADMIN_KOPERASI, Role.BENDAHARA, Role.JURU_BAYAR)
   @ApiOperation({ summary: 'Pelunasan dipercepat untuk sisa seluruh angsuran' })
   @ApiResponse({
     status: 200,
@@ -184,5 +191,26 @@ export class PinjamanController {
     @Body() dto?: PelunasanDipercepatDto,
   ) {
     return this.pinjamanService.pelunasanDipercepat(user, id, dto);
+  }
+
+  @Get(':id/kalkulasi-dinamis')
+  @ApiOperation({ summary: 'Kalkulasi dinamis angsuran, sisa pokok, 2x bunga pelunasan, toleransi 2 bulan & status blacklist' })
+  @ApiResponse({ status: 200, description: 'Rincian kalkulasi dinamis' })
+  getKalkulasiDinamis(
+    @CurrentUser() user: JwtUser,
+    @Param('id') id: string,
+  ) {
+    return this.pinjamanService.getKalkulasiDinamis(user, id);
+  }
+
+  @Post(':id/bayar-dinamis')
+  @ApiOperation({ summary: 'Bayar angsuran dinamis (prioritas bunga, sisa ke pokok, opsi 2x bunga pelunasan)' })
+  @ApiResponse({ status: 200, description: 'Pembayaran angsuran dinamis berhasil diproses' })
+  bayarDinamis(
+    @CurrentUser() user: JwtUser,
+    @Param('id') id: string,
+    @Body() dto: BayarAngsuranDinamisDto,
+  ) {
+    return this.pinjamanService.bayarDinamis(user, id, dto);
   }
 }

@@ -23,10 +23,20 @@ import {
 } from './dto/keuangan.dto';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import type { JwtUser } from 'src/common/interfaces/jwt-user.interface';
+import { Role } from '@prisma/client';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 
 @ApiTags('Keuangan & SHU')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
+@Roles(
+  Role.ADMIN_KOPERASI,
+  Role.BENDAHARA,
+  Role.KEPRIM,
+  Role.PIMPINAN,
+  Role.PENGAWAS,
+)
 @Controller('keuangan')
 export class KeuanganController {
   constructor(private readonly keuanganService: KeuanganService) {}
