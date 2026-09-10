@@ -46,6 +46,10 @@ export class SimpananService {
         korps: true,
         satminkal: true,
       },
+      orderBy: [
+        { pangkat: { kodePkt: 'desc' } },
+        { nama: 'asc' },
+      ],
     });
     const ids = anggota.map((a) => a.id);
 
@@ -244,7 +248,11 @@ export class SimpananService {
       include: {
         anggota: { include: { pangkat: true, korps: true } },
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: [
+        { anggota: { pangkat: { kodePkt: 'desc' } } },
+        { anggota: { nama: 'asc' } },
+        { createdAt: 'desc' },
+      ],
     });
 
     return simpananList.map((s) => ({

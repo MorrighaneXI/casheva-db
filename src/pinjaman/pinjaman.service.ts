@@ -90,7 +90,11 @@ export class PinjamanService {
         ...(status ? { status } : {}),
       },
       include: pinjamanInclude,
-      orderBy: { tanggalAjuan: 'desc' },
+      orderBy: [
+        { anggota: { pangkat: { kodePkt: 'desc' } } },
+        { anggota: { nama: 'asc' } },
+        { tanggalAjuan: 'desc' },
+      ],
     });
   }
 
@@ -182,7 +186,11 @@ export class PinjamanService {
           },
         },
       },
-      orderBy: [{ jatuhTempo: 'asc' }],
+      orderBy: [
+        { pinjaman: { anggota: { pangkat: { kodePkt: 'desc' } } } },
+        { pinjaman: { anggota: { nama: 'asc' } } },
+        { jatuhTempo: 'asc' },
+      ],
     });
 
     return angsuranList.map((a) => ({

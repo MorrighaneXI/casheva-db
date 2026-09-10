@@ -35,7 +35,8 @@ function kategoriPangkat(kodePkt: number): KategoriPangkat {
   if (kodePkt >= 91) return KategoriPangkat.PATI;       // 91-94: Brigjen, Mayjen, Letjen, Jenderal
   if (kodePkt >= 81) return KategoriPangkat.PAMEN;      // 81-83: Mayor, Letkol, Kolonel
   if (kodePkt >= 71) return KategoriPangkat.PAMA;       // 71-73: Letda, Lettu, Kapten
-  if (kodePkt >= 51) return KategoriPangkat.BINTARA;    // 51-66: Prada - Peltu
+  if (kodePkt >= 61) return KategoriPangkat.BINTARA;    // 61-66: Serda - Peltu
+  if (kodePkt >= 51) return KategoriPangkat.BATA_ASN;   // 51-56: Prada - Kopka (Tamtama)
   return KategoriPangkat.PNS;                           // 10-44: PNS I/A - IV/D, PPPK
 }
 
