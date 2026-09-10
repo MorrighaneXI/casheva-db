@@ -95,7 +95,7 @@ async function bootstrap() {
     .setTitle('API Koperasi Simpan Pinjam TNI AD')
     .setDescription(
       'Dokumentasi REST API Sistem Informasi Koperasi Simpan Pinjam (Lomba RTI 2026). ' +
-        'Mendukung fitur Multi-Tenant/Session Kotama & Satminkal, Simpanan, Pinjaman, dan SHU.',
+      'Mendukung fitur Multi-Tenant/Session Kotama & Satminkal, Simpanan, Pinjaman, dan SHU.',
     )
     .setVersion('1.0')
     .addBearerAuth(
@@ -149,7 +149,7 @@ async function bootstrap() {
   });
 
   const port = process.env.PORT || 3000;
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
   console.log(`🚀 Application is running on: http://localhost:${port}`);
   console.log(
     `📚 Swagger OpenAPI Docs available on: http://localhost:${port}/api/docs`,
