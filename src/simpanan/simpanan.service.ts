@@ -202,7 +202,10 @@ export class SimpananService {
     },
   ) {
     if (user.role === Role.ANGGOTA || (user.role as any) === 'Anggota') {
-      throw new BadRequestException('Setor simpanan hanya dapat dilakukan oleh Bendahara');
+      throw new BadRequestException('Setor simpanan tidak dapat dilakukan oleh Anggota');
+    }
+    if (dto.jenis === JenisSimpanan.KHUSUS && user.role !== Role.ADMIN_KOPERASI && user.role !== Role.BENDAHARA) {
+      throw new BadRequestException('Simpanan khusus hanya dapat dicatat oleh Bendahara');
     }
     await this.assertAnggotaScope(user, dto.anggotaId);
 
