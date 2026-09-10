@@ -167,6 +167,10 @@ export class KeuanganService {
             },
           },
         },
+        orderBy: [
+          { pangkat: { kodePkt: 'desc' } },
+          { nama: 'asc' },
+        ],
       });
 
       // 4. Hitung rincian per Anggota

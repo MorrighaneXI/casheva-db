@@ -36,7 +36,7 @@ export class AnggotaService {
         ...(isAnggota ? { nrpNip: user.username } : {}),
       },
       include: anggotaInclude,
-      orderBy: { nama: 'asc' },
+      orderBy: [{ pangkat: { kodePkt: 'desc' } }, { nama: 'asc' }],
     });
 
     const nrps = list.map((a) => a.nrpNip);

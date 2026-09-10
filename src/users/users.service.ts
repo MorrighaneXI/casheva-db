@@ -188,6 +188,11 @@ export class UsersService {
             }
           : null,
       };
+    }).sort((a, b) => {
+      const pktA = a.anggota?.pangkat?.kodePkt ?? -1;
+      const pktB = b.anggota?.pangkat?.kodePkt ?? -1;
+      if (pktB !== pktA) return pktB - pktA;
+      return (a.namaLengkap || '').localeCompare(b.namaLengkap || '');
     });
   }
 

@@ -50,7 +50,10 @@ export class ReportsService {
         korps: true,
         satminkal: { include: { kotama: true } },
       },
-      orderBy: { nama: 'asc' },
+      orderBy: [
+        { pangkat: { kodePkt: 'desc' } },
+        { nama: 'asc' },
+      ],
     });
 
     return {
@@ -105,7 +108,10 @@ export class ReportsService {
     const anggotaList = await this.prisma.anggota.findMany({
       where: { satminkalId, isAktif: true },
       include: { pangkat: true, korps: true, satminkal: true },
-      orderBy: { nama: 'asc' },
+      orderBy: [
+        { pangkat: { kodePkt: 'desc' } },
+        { nama: 'asc' },
+      ],
     });
 
     const simpananRows = await this.prisma.simpanan.findMany({
@@ -181,7 +187,11 @@ export class ReportsService {
         },
       },
       include: { anggota: { include: { pangkat: true, korps: true, satminkal: true } } },
-      orderBy: { tanggalCair: 'desc' },
+      orderBy: [
+        { anggota: { pangkat: { kodePkt: 'desc' } } },
+        { anggota: { nama: 'asc' } },
+        { tanggalCair: 'desc' },
+      ],
     });
 
     const data = pinjamanList.map((p, i) => {
@@ -346,7 +356,11 @@ export class ReportsService {
           },
         },
       },
-      orderBy: { tanggalBayar: 'asc' },
+      orderBy: [
+        { pinjaman: { anggota: { pangkat: { kodePkt: 'desc' } } } },
+        { pinjaman: { anggota: { nama: 'asc' } } },
+        { tanggalBayar: 'asc' },
+      ],
     });
 
     const data = angsuranList.map((a, i) => ({
@@ -385,6 +399,10 @@ export class ReportsService {
           include: {
             anggota: { include: { pangkat: true, korps: true } },
           },
+          orderBy: [
+            { anggota: { pangkat: { kodePkt: 'desc' } } },
+            { anggota: { nama: 'asc' } },
+          ],
         },
       },
     });
